@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app.dart';
 import 'core/config.dart';
 import 'data/auth_repository.dart';
+import 'data/ledger_repository.dart';
 import 'data/profile_repository.dart';
 import 'session/session_controller.dart';
 
@@ -18,6 +19,8 @@ Future<void> main() async {
     auth: SupabaseAuthRepository(client),
     profiles: SupabaseProfileRepository(client),
   );
-  runApp(DainApp(controller: controller));
+  runApp(
+    DainApp(controller: controller, ledgers: SupabaseLedgerRepository(client)),
+  );
   await controller.start();
 }

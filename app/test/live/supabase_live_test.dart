@@ -4,8 +4,9 @@
 //   flutter test test/live --dart-define=DAIN_LIVE=true
 //
 // Uses the Supabase test numbers 966500000001 / 966500000002 (code 123456),
-// so no SMS is sent. Profiles are created once; every run adds one new shop
-// and one shop ledger for B's phone, so each run proves a fresh link.
+// so no SMS is sent. Profiles are created once; every run adds new shops,
+// shop ledgers for B's phone and entries, so each run proves a fresh link
+// and fresh balances.
 @Tags(['live'])
 library;
 
@@ -13,6 +14,7 @@ import 'dart:io';
 
 import 'package:dain/core/config.dart';
 import 'package:dain/data/auth_repository.dart';
+import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/data/profile_repository.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -127,6 +129,80 @@ void main() {
 
       // A never becomes its own counterparty.
       expect(await SupabaseProfileRepository(a.client).linkMyLedgers(), 0);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'the ledger list shows the agreed balance from each side',
+    () async {
+      final a = _Session();
+      final b = _Session();
+      addTearDown(a.close);
+      addTearDown(b.close);
+
+      await a.signIn('0500000001', 'تجربة أ');
+      final shopName = 'live list ${DateTime.now().toUtc().toIso8601String()}';
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': shopName})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+
+      // A sold B 123.45 SAR (B will confirm) and B paid 3.45 (left pending).
+      final sale = await a.client
+          .from('entries')
+          .insert({
+            'ledger_id': ledgerId,
+            'direction': 'out',
+            'amount_minor': 12345,
+          })
+          .select('id')
+          .single();
+      await a.client.from('entries').insert({
+        'ledger_id': ledgerId,
+        'direction': 'in',
+        'amount_minor': 345,
+      });
+
+      await b.signIn('0500000002', 'تجربة ب');
+      await b.client.rpc<dynamic>(
+        'respond_entry',
+        params: {'p_entry_id': sale['id'], 'p_decision': 'confirmed'},
+      );
+
+      // Owner's side: B owes A.
+      final mine = await SupabaseLedgerRepository(a.client).fetchMine();
+      final asOwner = mine.singleWhere((l) => l.id == ledgerId);
+      expect(asOwner.iAmOwner, isTrue);
+      expect(asOwner.title, 'تجربة ب');
+      expect(asOwner.subtitle, shopName);
+      expect(asOwner.otherPartyJoined, isTrue);
+      expect(asOwner.myConfirmedMinor, 12345);
+      expect(asOwner.myOpenMinor, 12000);
+      expect(asOwner.pendingCount, 1);
+      expect(asOwner.disputedCount, 0);
+
+      // Counterparty's side: the same ledger, sign flipped, shop as title.
+      final theirs = await SupabaseLedgerRepository(b.client).fetchMine();
+      final asCounterparty = theirs.singleWhere((l) => l.id == ledgerId);
+      expect(asCounterparty.iAmOwner, isFalse);
+      expect(asCounterparty.title, shopName);
+      expect(asCounterparty.subtitle, a.controller.profile!.fullName);
+      expect(asCounterparty.myConfirmedMinor, -12345);
+      expect(asCounterparty.myOpenMinor, -12000);
+      expect(asCounterparty.pendingCount, 1);
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),

@@ -14,7 +14,9 @@ void main() {
 
   Future<void> launch(WidgetTester tester) async {
     controller = SessionController(auth: auth, profiles: profiles);
-    await tester.pumpWidget(DainApp(controller: controller));
+    await tester.pumpWidget(
+      DainApp(controller: controller, ledgers: FakeLedgers()),
+    );
     await controller.start();
     await tester.pumpAndSettle();
   }
@@ -87,7 +89,8 @@ void main() {
 
     expect(find.byKey(const Key('name_field')), findsNothing);
     expect(controller.stage, SessionStage.ready);
-    expect(find.text('لا توجد دفاتر جديدة مسجّلة برقمك.'), findsOneWidget);
+    expect(find.text('دفاتري'), findsOneWidget);
+    expect(find.byKey(const Key('linked_banner')), findsNothing);
   });
 
   testWidgets('invalid phone never reaches the server', (tester) async {

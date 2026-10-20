@@ -280,29 +280,6 @@ class FailedScreen extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.controller});
-
-  final SessionController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final n = controller.linkedCount ?? 0;
-    return _Frame(
-      controller: controller,
-      title: 'أهلاً، ${controller.profile?.fullName ?? ''}',
-      subtitle: linkedLedgersMessage(n),
-      children: [
-        OutlinedButton(
-          key: const Key('sign_out_button'),
-          onPressed: controller.busy ? null : controller.signOut,
-          child: const Text('تسجيل الخروج'),
-        ),
-      ],
-    );
-  }
-}
-
 /// Arabic number agreement for "ledgers recorded against your number".
 String linkedLedgersMessage(int n) {
   if (n <= 0) return 'لا توجد دفاتر جديدة مسجّلة برقمك.';

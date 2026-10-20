@@ -1,4 +1,5 @@
 import 'package:dain/data/auth_repository.dart';
+import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/data/profile_repository.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -77,5 +78,22 @@ class FakeProfiles implements ProfileRepository {
     final n = pendingLedgers;
     pendingLedgers = 0;
     return n;
+  }
+}
+
+/// Returns [ledgers] (or throws [failWith]) on each fetch.
+class FakeLedgers implements LedgerRepository {
+  FakeLedgers([this.ledgers = const []]);
+
+  List<LedgerSummary> ledgers;
+  Object? failWith;
+  int fetches = 0;
+
+  @override
+  Future<List<LedgerSummary>> fetchMine() async {
+    fetches++;
+    final error = failWith;
+    if (error != null) throw error;
+    return ledgers;
   }
 }

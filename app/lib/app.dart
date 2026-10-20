@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'data/ledger_repository.dart';
 import 'session/session_controller.dart';
 import 'ui/session_gate.dart';
 
 class DainApp extends StatelessWidget {
-  const DainApp({super.key, required this.controller});
+  const DainApp({super.key, required this.controller, required this.ledgers});
 
   final SessionController controller;
+  final LedgerRepository ledgers;
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +21,7 @@ class DainApp extends StatelessWidget {
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: _theme(Brightness.light),
       darkTheme: _theme(Brightness.dark),
-      home: SessionGate(controller: controller),
+      home: SessionGate(controller: controller, ledgers: ledgers),
     );
   }
 

@@ -1,13 +1,15 @@
 # Dain app
 
 Flutter client for the Dain ledger. Current scope: phone OTP sign-in, profile
-creation, then `link_my_ledgers()`.
+creation, `link_my_ledgers()`, then the list of my ledgers with balances seen
+from my side (`ledgers` + the `ledger_balances` view).
 
 ```
 lib/
   core/      config (Supabase URL + publishable key), phone normalization, Arabic errors
   data/      AuthRepository / ProfileRepository and their Supabase implementations
   session/   SessionController: phone -> code -> profile -> link_my_ledgers
+  ledgers/   LedgersController: loads and refreshes the list
   ui/        SessionGate and the screens
 ```
 

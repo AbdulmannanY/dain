@@ -34,7 +34,7 @@ String arabicMessageFor(Object error) {
     return 'تعذّر تسجيل الدخول. حاول مجدداً.';
   }
   if (error is PostgrestException) {
-    return 'تعذّر حفظ البيانات. حاول مجدداً.';
+    return 'تعذّر إتمام العملية. حاول مجدداً.';
   }
   return 'حدث خطأ غير متوقع. حاول مجدداً.';
 }

@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: app
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Read pinned Flutter version from .fvmrc
         id: fvm
@@ -78,7 +78,7 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Migrations + RLS/RPC tests
         run: bash supabase/tests/run_tests.sh
