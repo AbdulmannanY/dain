@@ -101,12 +101,84 @@ class FakeLedgers implements LedgerRepository {
   /// (business id or '', phone) of every ledger opened.
   final opened = <(String, String)>[];
 
+  /// ledger id -> its entries from my side, newest first.
+  final entries = <String, List<LedgerEntry>>{};
+
+  /// Thrown once by the next [addEntry].
+  Object? failNextAddWith;
+
+  /// (ledger id, stored direction, amount, note, day) of every entry added.
+  final added = <(String, String, int, String?, DateTime)>[];
+
   @override
   Future<List<LedgerSummary>> fetchMine() async {
     fetches++;
     final error = failWith;
     if (error != null) throw error;
     return ledgers;
+  }
+
+  @override
+  Future<LedgerSummary> fetchLedger(String id) async {
+    final error = failWith;
+    if (error != null) throw error;
+    return ledgers.singleWhere((l) => l.id == id);
+  }
+
+  @override
+  Future<List<LedgerEntry>> fetchEntries(LedgerSummary ledger) async {
+    final error = failWith;
+    if (error != null) throw error;
+    return entries[ledger.id] ?? const [];
+  }
+
+  /// Like the database: a pending entry, counted in the open balance and the
+  /// pending count of the ledger's summary.
+  @override
+  Future<void> addEntry(
+    LedgerSummary ledger, {
+    required bool iGave,
+    required int amountMinor,
+    String? note,
+    required DateTime occurredOn,
+  }) async {
+    final error = failNextAddWith;
+    if (error != null) {
+      failNextAddWith = null;
+      throw error;
+    }
+    final direction = entryDirection(iAmOwner: ledger.iAmOwner, iGave: iGave);
+    added.add((ledger.id, direction, amountMinor, note, occurredOn));
+    final delta = iGave ? amountMinor : -amountMinor;
+    entries[ledger.id] = [
+      LedgerEntry(
+        id: 'e${added.length}',
+        myDeltaMinor: delta,
+        note: note,
+        occurredOn: occurredOn,
+        status: EntryStatus.pending,
+        createdByMe: true,
+        responseNote: null,
+      ),
+      ...?entries[ledger.id],
+    ];
+    ledgers = [
+      for (final l in ledgers)
+        l.id != ledger.id
+            ? l
+            : LedgerSummary(
+                id: l.id,
+                iAmOwner: l.iAmOwner,
+                title: l.title,
+                subtitle: l.subtitle,
+                currency: l.currency,
+                myConfirmedMinor: l.myConfirmedMinor,
+                myOpenMinor: l.myOpenMinor + delta,
+                pendingCount: l.pendingCount + 1,
+                disputedCount: l.disputedCount,
+                otherPartyJoined: l.otherPartyJoined,
+              ),
+    ];
   }
 
   @override

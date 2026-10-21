@@ -16,6 +16,7 @@ import 'package:dain/core/config.dart';
 import 'package:dain/data/auth_repository.dart';
 import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/data/profile_repository.dart';
+import 'package:dain/ledgers/ledger_controller.dart';
 import 'package:dain/ledgers/open_ledger_controller.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -287,6 +288,115 @@ void main() {
         (await bLedgers.fetchMyBusinesses()).map((s) => s.id),
         isNot(contains(shop.id)),
       );
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'entries recorded from each side keep their meaning on both sides',
+    () async {
+      // Setup through RLS as A: a new shop ledger for B's phone, linked to B.
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live entries ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      // The screens' controllers with the real repositories.
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      await aView.load();
+      await bView.load();
+      expect(aView.error, isNull);
+      expect(bView.error, isNull);
+      expect(aView.ledger!.iAmOwner, isTrue);
+      expect(bView.ledger!.iAmOwner, isFalse);
+
+      // A (owner) gave 100.00; then B (counterparty) gave 30.00.
+      expect(
+        await aView.addEntry(iGave: true, amount: '100', note: 'live'),
+        isTrue,
+        reason: aView.formError,
+      );
+      expect(
+        await bView.addEntry(iGave: true, amount: '٣٠'),
+        isTrue,
+        reason: bView.formError,
+      );
+
+      // Stored relative to the owner, each with its author and pending.
+      final rows = await a.client
+          .from('entries')
+          .select('id, direction, amount_minor, status, note, created_by')
+          .eq('ledger_id', ledgerId)
+          .order('created_at', ascending: true);
+      expect(
+        rows.map(
+          (r) => (
+            r['direction'],
+            r['amount_minor'],
+            r['status'],
+            r['note'],
+            r['created_by'],
+          ),
+        ),
+        [
+          ('out', 10000, 'pending', 'live', a.uid),
+          ('in', 3000, 'pending', null, b.uid),
+        ],
+      );
+
+      // Pending only: the agreed balance is still zero on both sides.
+      await aView.load();
+      expect(aView.ledger!.myConfirmedMinor, 0);
+      expect(aView.ledger!.myOpenMinor, 7000);
+      expect(bView.ledger!.myOpenMinor, -7000);
+
+      // Each side confirms the other's entry (the buttons come next).
+      await b.client.rpc<dynamic>(
+        'respond_entry',
+        params: {'p_entry_id': rows[0]['id'], 'p_decision': 'confirmed'},
+      );
+      await a.client.rpc<dynamic>(
+        'respond_entry',
+        params: {'p_entry_id': rows[1]['id'], 'p_decision': 'confirmed'},
+      );
+      await aView.load();
+      await bView.load();
+
+      // B owes A 70.00, seen from each side; newest entry first.
+      expect(aView.ledger!.myConfirmedMinor, 7000);
+      expect(bView.ledger!.myConfirmedMinor, -7000);
+      (int, bool, EntryStatus) view(LedgerEntry e) =>
+          (e.myDeltaMinor, e.createdByMe, e.status);
+      expect(aView.entries.map(view), [
+        (-3000, false, EntryStatus.confirmed),
+        (10000, true, EntryStatus.confirmed),
+      ]);
+      expect(bView.entries.map(view), [
+        (3000, true, EntryStatus.confirmed),
+        (-10000, false, EntryStatus.confirmed),
+      ]);
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),

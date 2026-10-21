@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/ledger_repository.dart';
 import '../ledgers/open_ledger_controller.dart';
+import 'common.dart';
 
 /// "New ledger": the other party's name and phone, and whether the ledger is
 /// personal or under one of my shops (or a new one). Pops with the new
@@ -58,7 +59,7 @@ class _OpenLedgerScreenState extends State<OpenLedgerScreen> {
           if (shops == null) {
             return _form.error == null
                 ? const Center(child: CircularProgressIndicator())
-                : _LoadError(message: _form.error!, onRetry: _form.load);
+                : LoadError(message: _form.error!, onRetry: _form.load);
           }
           return _buildForm(context, shops);
         },
@@ -157,38 +158,6 @@ class _OpenLedgerScreenState extends State<OpenLedgerScreen> {
               : const Text('فتح الدفتر'),
         ),
       ],
-    );
-  }
-}
-
-class _LoadError extends StatelessWidget {
-  const _LoadError({required this.message, required this.onRetry});
-
-  final String message;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              key: const Key('error_text'),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              key: const Key('retry_button'),
-              onPressed: onRetry,
-              child: const Text('إعادة المحاولة'),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

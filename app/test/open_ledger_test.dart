@@ -61,6 +61,13 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// From the ledger's screen back to the list.
+  Future<void> back(WidgetTester tester) async {
+    // pageBack() looks for the English 'Back' tooltip; the app is Arabic.
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+  }
+
   bool chipSelected(WidgetTester tester, String key) =>
       tester.widget<ChoiceChip>(find.byKey(Key(key))).selected;
 
@@ -69,7 +76,9 @@ void main() {
     matching: find.text(text),
   );
 
-  testWidgets('opens a personal ledger and the list shows it', (tester) async {
+  testWidgets('opens a personal ledger, shows it, and the list has it', (
+    tester,
+  ) async {
     await openForm(tester);
     expect(chipSelected(tester, 'owner_personal'), isTrue);
     expect(find.byKey(const Key('new_shop_field')), findsNothing);
@@ -77,8 +86,13 @@ void main() {
     await fill(tester, phone: '٠٥٠ ١٢٣ ٤٥٦٧');
 
     expect(ledgers.opened, [('', '966501234567')]);
+    // The new ledger's own screen opens straight away.
+    expect(find.byKey(const Key('entries_empty')), findsOneWidget);
+    expect(find.byKey(const Key('not_joined_note')), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'سعد'), findsOneWidget);
+
+    await back(tester);
     expect(find.byKey(const Key('ledgers_list')), findsOneWidget);
-    expect(find.text('فُتح الدفتر.'), findsOneWidget);
     expect(inTile('new-1', 'سعد'), findsOneWidget);
     expect(inTile('new-1', 'لم ينضم بعد'), findsOneWidget);
   });
@@ -89,6 +103,7 @@ void main() {
     await openForm(tester);
     await fill(tester, phone: '0501234567', owner: 'owner_shop_shop-a');
     expect(ledgers.opened, [('shop-a', '966501234567')]);
+    await back(tester);
     expect(inTile('new-1', 'بقالة النور · لم ينضم بعد'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('new_ledger_button')));
@@ -145,6 +160,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(ledgers.businesses, hasLength(2));
     expect(ledgers.opened, [('shop-2', '966509876543')]);
+    await back(tester);
     expect(inTile('new-1', 'محل الوفاء · لم ينضم بعد'), findsOneWidget);
   });
 

@@ -4,6 +4,8 @@ import '../core/money.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/ledgers_controller.dart';
 import '../session/session_controller.dart';
+import 'common.dart';
+import 'ledger_screen.dart';
 import 'open_ledger_screen.dart';
 import 'screens.dart';
 
@@ -45,10 +47,21 @@ class _LedgersScreenState extends State<LedgersScreen> {
       ),
     );
     if (id == null || !mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('فُتح الدفتر.')));
-    await _ledgers.load();
+    await _showLedger(id);
+  }
+
+  /// The ledger's screen; balances may change there, so the list reloads.
+  Future<void> _showLedger(String id, [String? title]) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => LedgerScreen(
+          repository: widget.repository,
+          ledgerId: id,
+          title: title,
+        ),
+      ),
+    );
+    if (mounted) await _ledgers.load();
   }
 
   @override
@@ -79,7 +92,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
           if (list == null) {
             return _ledgers.error == null
                 ? const Center(child: CircularProgressIndicator())
-                : _LoadError(message: _ledgers.error!, onRetry: _ledgers.load);
+                : LoadError(message: _ledgers.error!, onRetry: _ledgers.load);
           }
           return RefreshIndicator(
             onRefresh: _ledgers.load,
@@ -98,7 +111,11 @@ class _LedgersScreenState extends State<LedgersScreen> {
                 if (list.isEmpty)
                   const _Empty()
                 else
-                  for (final l in list) _LedgerTile(ledger: l),
+                  for (final l in list)
+                    _LedgerTile(
+                      ledger: l,
+                      onTap: () => _showLedger(l.id, l.title),
+                    ),
               ],
             ),
           );
@@ -159,7 +176,7 @@ class _Header extends StatelessWidget {
                     boxKey: Key('total_owed_to_me_${t.currency}'),
                     label: 'لك',
                     amount: formatMoney(t.owedToMeMinor, t.currency),
-                    color: _owedToMeColor(theme),
+                    color: owedToMeColor(theme),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -218,9 +235,10 @@ class _TotalBox extends StatelessWidget {
 }
 
 class _LedgerTile extends StatelessWidget {
-  const _LedgerTile({required this.ledger});
+  const _LedgerTile({required this.ledger, required this.onTap});
 
   final LedgerSummary ledger;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -234,13 +252,14 @@ class _LedgerTile extends StatelessWidget {
       if (l.disputedCount > 0) '${l.disputedCount} معترض عليه',
     ];
     final (label, color) = v > 0
-        ? ('لك', _owedToMeColor(theme))
+        ? ('لك', owedToMeColor(theme))
         : v < 0
         ? ('عليك', theme.colorScheme.error)
         : ('لا رصيد', theme.colorScheme.onSurfaceVariant);
 
     return ListTile(
       key: Key('ledger_${l.id}'),
+      onTap: onTap,
       leading: CircleAvatar(
         child: Icon(
           l.subtitle != null && !l.iAmOwner ? Icons.store : Icons.person,
@@ -284,39 +303,3 @@ class _Empty extends StatelessWidget {
     );
   }
 }
-
-class _LoadError extends StatelessWidget {
-  const _LoadError({required this.message, required this.onRetry});
-
-  final String message;
-  final Future<void> Function() onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              message,
-              key: const Key('error_text'),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              key: const Key('retry_button'),
-              onPressed: onRetry,
-              child: const Text('إعادة المحاولة'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-Color _owedToMeColor(ThemeData theme) => theme.brightness == Brightness.dark
-    ? const Color(0xFF7FD8B0)
-    : const Color(0xFF0E6B4F);

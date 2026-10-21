@@ -110,6 +110,68 @@ List<BalanceTotal> totalsByCurrency(List<LedgerSummary> ledgers) {
   ];
 }
 
+enum EntryStatus { pending, confirmed, disputed, voided }
+
+/// The stored direction is relative to the ledger OWNER ('out' = the owner
+/// gave). [iGave] is from the person recording, so the counterparty giving is
+/// 'in'.
+String entryDirection({required bool iAmOwner, required bool iGave}) =>
+    iAmOwner == iGave ? 'out' : 'in';
+
+/// One entry as the signed-in person sees it.
+class LedgerEntry {
+  const LedgerEntry({
+    required this.id,
+    required this.myDeltaMinor,
+    required this.note,
+    required this.occurredOn,
+    required this.status,
+    required this.createdByMe,
+    required this.responseNote,
+  });
+
+  final String id;
+
+  /// From my side: positive = I gave (the other party owes me more),
+  /// negative = I took.
+  final int myDeltaMinor;
+  final String? note;
+  final DateTime occurredOn;
+  final EntryStatus status;
+  final bool createdByMe;
+  final String? responseNote;
+}
+
+/// Turns `entries` rows into [LedgerEntry]s from my side, keeping their order.
+List<LedgerEntry> buildEntries(
+  List<Map<String, dynamic>> rows, {
+  required bool iAmOwner,
+  required String myId,
+}) {
+  final sign = iAmOwner ? 1 : -1;
+  return [
+    for (final r in rows)
+      LedgerEntry(
+        id: r['id'] as String,
+        myDeltaMinor:
+            sign *
+            (r['direction'] == 'out' ? 1 : -1) *
+            (r['amount_minor'] as num).toInt(),
+        note: r['note'] as String?,
+        occurredOn: DateTime.parse(r['occurred_on'] as String),
+        status: EntryStatus.values.byName(r['status'] as String),
+        createdByMe: r['created_by'] == myId,
+        responseNote: r['response_note'] as String?,
+      ),
+  ];
+}
+
+/// 2026-10-21, the form of a Postgres `date`.
+String isoDay(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-'
+    '${d.month.toString().padLeft(2, '0')}-'
+    '${d.day.toString().padLeft(2, '0')}';
+
 /// A shop the signed-in person owns.
 class Business {
   const Business({required this.id, required this.name});
@@ -121,6 +183,22 @@ class Business {
 abstract interface class LedgerRepository {
   /// Every ledger I own or am the linked counterparty of (RLS decides).
   Future<List<LedgerSummary>> fetchMine();
+
+  /// One ledger I own or am linked to, as [fetchMine] builds it.
+  Future<LedgerSummary> fetchLedger(String id);
+
+  /// Its entries from my side, newest first.
+  Future<List<LedgerEntry>> fetchEntries(LedgerSummary ledger);
+
+  /// Records a pending entry; [iGave] is from my side. The other party
+  /// confirms or disputes it.
+  Future<void> addEntry(
+    LedgerSummary ledger, {
+    required bool iGave,
+    required int amountMinor,
+    String? note,
+    required DateTime occurredOn,
+  });
 
   /// My verified phone as E.164 digits without '+', the form
   /// `link_my_ledgers()` matches; null when unknown.
@@ -155,10 +233,21 @@ class SupabaseLedgerRepository implements LedgerRepository {
   }
 
   @override
-  Future<List<LedgerSummary>> fetchMine() async {
+  Future<List<LedgerSummary>> fetchMine() => _summaries();
+
+  @override
+  Future<LedgerSummary> fetchLedger(String id) async {
+    final found = await _summaries(id: id);
+    if (found.isEmpty) {
+      throw const PostgrestException(message: 'ledger not found');
+    }
+    return found.single;
+  }
+
+  Future<List<LedgerSummary>> _summaries({String? id}) async {
     final myId = _myId;
     // ledgers has two FKs to profiles, so the owner embed names its FK.
-    final ledgers = await _client
+    var ledgerQuery = _client
         .from('ledgers')
         .select(
           'id, owner_id, counterparty_id, counterparty_name, currency, '
@@ -166,17 +255,56 @@ class SupabaseLedgerRepository implements LedgerRepository {
           'owner:profiles!ledgers_owner_id_fkey(full_name)',
         );
     // ledger_balances is a security_invoker view: same RLS as ledgers.
-    final balances = await _client
+    var balanceQuery = _client
         .from('ledger_balances')
         .select(
           'ledger_id, confirmed_balance_minor, open_balance_minor, '
           'pending_count, disputed_count',
         );
+    if (id != null) {
+      ledgerQuery = ledgerQuery.eq('id', id);
+      balanceQuery = balanceQuery.eq('ledger_id', id);
+    }
+    final ledgers = await ledgerQuery;
+    final balances = await balanceQuery;
     return buildSummaries(
       ledgerRows: ledgers,
       balanceRows: balances,
       myId: myId,
     );
+  }
+
+  @override
+  Future<List<LedgerEntry>> fetchEntries(LedgerSummary ledger) async {
+    final rows = await _client
+        .from('entries')
+        .select(
+          'id, direction, amount_minor, note, occurred_on, status, '
+          'response_note, created_by',
+        )
+        .eq('ledger_id', ledger.id)
+        .order('occurred_on', ascending: false)
+        .order('created_at', ascending: false);
+    return buildEntries(rows, iAmOwner: ledger.iAmOwner, myId: _myId);
+  }
+
+  @override
+  Future<void> addEntry(
+    LedgerSummary ledger, {
+    required bool iGave,
+    required int amountMinor,
+    String? note,
+    required DateTime occurredOn,
+  }) async {
+    // Only these columns are granted; status starts as 'pending' and
+    // created_by defaults to auth.uid().
+    await _client.from('entries').insert({
+      'ledger_id': ledger.id,
+      'direction': entryDirection(iAmOwner: ledger.iAmOwner, iGave: iGave),
+      'amount_minor': amountMinor,
+      'note': ?note,
+      'occurred_on': isoDay(occurredOn),
+    });
   }
 
   @override
