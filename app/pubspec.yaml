@@ -12,6 +12,13 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   supabase_flutter: ^2.18.3
+  # Not used directly: supabase_flutter stores the session through it.
+  # 2.5.x calls its Kotlin registrar through JNI by name, and R8 renames or
+  # strips that method in release builds, so the APK failed at startup with
+  # NoSuchMethodError SharedPreferencesApiRegistrar.getAll (dain-apk-15).
+  # Stay on the method-channel implementation until that is fixed upstream;
+  # test/release_plugins_test.dart keeps this from creeping back.
+  shared_preferences_android: ">=2.4.28 <2.5.0"
 
 dev_dependencies:
   flutter_test:
