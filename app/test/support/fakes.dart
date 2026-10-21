@@ -110,6 +110,12 @@ class FakeLedgers implements LedgerRepository {
   /// (ledger id, stored direction, amount, note, day) of every entry added.
   final added = <(String, String, int, String?, DateTime)>[];
 
+  /// Thrown once by the next [respondEntry] or [voidEntry].
+  Object? failNextActionWith;
+
+  /// (entry id, 'confirmed' | 'disputed' | 'voided', note) of every action.
+  final actions = <(String, String, String?)>[];
+
   @override
   Future<List<LedgerSummary>> fetchMine() async {
     fetches++;
@@ -179,6 +185,84 @@ class FakeLedgers implements LedgerRepository {
                 otherPartyJoined: l.otherPartyJoined,
               ),
     ];
+  }
+
+  @override
+  Future<void> respondEntry(
+    String entryId, {
+    required bool confirm,
+    String? note,
+  }) async {
+    final to = confirm ? EntryStatus.confirmed : EntryStatus.disputed;
+    _act(entryId, to, note);
+  }
+
+  @override
+  Future<void> voidEntry(String entryId) async =>
+      _act(entryId, EntryStatus.voided, null);
+
+  /// Moves an entry to [to] and its ledger's summary with it, like the
+  /// ledger_balances view: open = confirmed + pending.
+  void _act(String entryId, EntryStatus to, String? note) {
+    final error = failNextActionWith;
+    if (error != null) {
+      failNextActionWith = null;
+      throw error;
+    }
+    actions.add((entryId, to.name, note));
+    for (final MapEntry(key: ledgerId, value: list) in entries.entries) {
+      final i = list.indexWhere((e) => e.id == entryId);
+      if (i < 0) continue;
+      final e = list[i];
+      entries[ledgerId] = [...list]
+        ..[i] = LedgerEntry(
+          id: e.id,
+          myDeltaMinor: e.myDeltaMinor,
+          note: e.note,
+          occurredOn: e.occurredOn,
+          status: to,
+          createdByMe: e.createdByMe,
+          responseNote: to == EntryStatus.voided ? e.responseNote : note,
+        );
+      int counted(EntryStatus s, {required bool open}) => switch (s) {
+        EntryStatus.confirmed => e.myDeltaMinor,
+        EntryStatus.pending => open ? e.myDeltaMinor : 0,
+        _ => 0,
+      };
+      int count(EntryStatus s, EntryStatus of) => s == of ? 1 : 0;
+      final from = e.status;
+      ledgers = [
+        for (final l in ledgers)
+          l.id != ledgerId
+              ? l
+              : LedgerSummary(
+                  id: l.id,
+                  iAmOwner: l.iAmOwner,
+                  title: l.title,
+                  subtitle: l.subtitle,
+                  currency: l.currency,
+                  myConfirmedMinor:
+                      l.myConfirmedMinor -
+                      counted(from, open: false) +
+                      counted(to, open: false),
+                  myOpenMinor:
+                      l.myOpenMinor -
+                      counted(from, open: true) +
+                      counted(to, open: true),
+                  pendingCount:
+                      l.pendingCount -
+                      count(from, EntryStatus.pending) +
+                      count(to, EntryStatus.pending),
+                  disputedCount:
+                      l.disputedCount -
+                      count(from, EntryStatus.disputed) +
+                      count(to, EntryStatus.disputed),
+                  otherPartyJoined: l.otherPartyJoined,
+                ),
+      ];
+      return;
+    }
+    throw const PostgrestException(message: 'entry not found', code: 'P0002');
   }
 
   @override

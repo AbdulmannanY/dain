@@ -73,6 +73,31 @@ void main() {
     });
   });
 
+  test('entryActions mirror respond_entry and void_entry', () {
+    Set<EntryAction> of(EntryStatus status, {required bool mine}) =>
+        entryActions(
+          LedgerEntry(
+            id: 'x',
+            myDeltaMinor: 1,
+            note: null,
+            occurredOn: DateTime(2026),
+            status: status,
+            createdByMe: mine,
+            responseNote: null,
+          ),
+        );
+    const c = EntryAction.confirm, d = EntryAction.dispute;
+    const w = EntryAction.withdraw;
+    expect(of(EntryStatus.pending, mine: false), {c, d});
+    expect(of(EntryStatus.disputed, mine: false), {c});
+    expect(of(EntryStatus.confirmed, mine: false), isEmpty);
+    expect(of(EntryStatus.voided, mine: false), isEmpty);
+    expect(of(EntryStatus.pending, mine: true), {w});
+    expect(of(EntryStatus.disputed, mine: true), {w});
+    expect(of(EntryStatus.confirmed, mine: true), isEmpty);
+    expect(of(EntryStatus.voided, mine: true), isEmpty);
+  });
+
   test('isoDay', () {
     expect(isoDay(DateTime(2026, 1, 5, 23, 59)), '2026-01-05');
   });

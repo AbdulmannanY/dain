@@ -142,6 +142,23 @@ class LedgerEntry {
   final String? responseNote;
 }
 
+/// What I may do with an entry, mirroring `respond_entry` and `void_entry`:
+/// the other party confirms or disputes a pending entry and confirms a
+/// disputed one; the creator withdraws a pending or disputed one. Confirmed
+/// and voided entries are final.
+enum EntryAction { confirm, dispute, withdraw }
+
+Set<EntryAction> entryActions(LedgerEntry e) {
+  final open =
+      e.status == EntryStatus.pending || e.status == EntryStatus.disputed;
+  if (!open) return const {};
+  if (e.createdByMe) return const {EntryAction.withdraw};
+  return {
+    EntryAction.confirm,
+    if (e.status == EntryStatus.pending) EntryAction.dispute,
+  };
+}
+
 /// Turns `entries` rows into [LedgerEntry]s from my side, keeping their order.
 List<LedgerEntry> buildEntries(
   List<Map<String, dynamic>> rows, {
@@ -199,6 +216,17 @@ abstract interface class LedgerRepository {
     String? note,
     required DateTime occurredOn,
   });
+
+  /// The other party confirms ([confirm]) or disputes an entry, a dispute
+  /// with its reason in [note] (`respond_entry`).
+  Future<void> respondEntry(
+    String entryId, {
+    required bool confirm,
+    String? note,
+  });
+
+  /// The creator withdraws a pending or disputed entry (`void_entry`).
+  Future<void> voidEntry(String entryId);
 
   /// My verified phone as E.164 digits without '+', the form
   /// `link_my_ledgers()` matches; null when unknown.
@@ -305,6 +333,27 @@ class SupabaseLedgerRepository implements LedgerRepository {
       'note': ?note,
       'occurred_on': isoDay(occurredOn),
     });
+  }
+
+  @override
+  Future<void> respondEntry(
+    String entryId, {
+    required bool confirm,
+    String? note,
+  }) async {
+    await _client.rpc<dynamic>(
+      'respond_entry',
+      params: {
+        'p_entry_id': entryId,
+        'p_decision': confirm ? 'confirmed' : 'disputed',
+        'p_note': note,
+      },
+    );
+  }
+
+  @override
+  Future<void> voidEntry(String entryId) async {
+    await _client.rpc<dynamic>('void_entry', params: {'p_entry_id': entryId});
   }
 
   @override

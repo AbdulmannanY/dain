@@ -401,4 +401,94 @@ void main() {
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'confirm, dispute and withdraw through the screens\' controller',
+    () async {
+      // Setup through RLS as A: a new shop ledger for B's phone, linked to B.
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live respond ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      await aView.load();
+      expect(await aView.addEntry(iGave: true, amount: '50'), isTrue);
+      expect(await aView.addEntry(iGave: true, amount: '20'), isTrue);
+      await bView.load();
+      final [second, first] = bView.entries; // newest first
+      expect(entryActions(first), {EntryAction.confirm, EntryAction.dispute});
+      expect(entryActions(aView.entries.last), {EntryAction.withdraw});
+
+      // B disputes 50 with a reason; an empty reason never reaches the server.
+      expect(await bView.disputeEntry(first.id, '  '), isFalse);
+      expect(await bView.disputeEntry(first.id, ' ليس لي '), isTrue);
+      final row = await a.client
+          .from('entries')
+          .select('status, response_note, responded_via')
+          .eq('id', first.id)
+          .single();
+      expect(row, {
+        'status': 'disputed',
+        'response_note': 'ليس لي',
+        'responded_via': 'app',
+      });
+
+      // Disputing it again: respond_entry refuses (55000) and B reloads.
+      expect(await bView.disputeEntry(first.id, 'مرة ثانية'), isFalse);
+      expect(bView.formError, 'تغيّرت حالة هذا القيد. أُعيد تحميل الدفتر.');
+      expect(bView.entries.last.status, EntryStatus.disputed);
+
+      // A withdraws the disputed 50.
+      await aView.load();
+      expect(await aView.withdrawEntry(first.id), isTrue);
+
+      // B disputes 20, then confirms it after they settle it.
+      expect(await bView.disputeEntry(second.id, 'لاحقاً'), isTrue);
+      expect(await bView.confirmEntry(second.id), isTrue);
+
+      // A cannot withdraw what is confirmed.
+      await aView.load();
+      expect(await aView.withdrawEntry(second.id), isFalse);
+      expect(aView.formError, 'تغيّرت حالة هذا القيد. أُعيد تحميل الدفتر.');
+
+      await bView.load();
+      (int, EntryStatus) view(LedgerEntry e) => (e.myDeltaMinor, e.status);
+      expect(aView.entries.map(view), [
+        (2000, EntryStatus.confirmed),
+        (5000, EntryStatus.voided),
+      ]);
+      expect(bView.entries.map(view), [
+        (-2000, EntryStatus.confirmed),
+        (-5000, EntryStatus.voided),
+      ]);
+      expect(aView.ledger!.myConfirmedMinor, 2000);
+      expect(aView.ledger!.myOpenMinor, 2000);
+      expect(bView.ledger!.myConfirmedMinor, -2000);
+      expect(bView.ledger!.pendingCount + bView.ledger!.disputedCount, 0);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }

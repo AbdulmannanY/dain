@@ -6,7 +6,8 @@ import '../ledgers/ledger_controller.dart';
 import 'common.dart';
 
 /// One ledger: the agreed balance from my side, the entries newest first,
-/// and "أعطيت" / "أخذت" to record a new one.
+/// "أعطيت" / "أخذت" to record a new one, and tapping an entry to confirm,
+/// dispute or withdraw it.
 class LedgerScreen extends StatefulWidget {
   const LedgerScreen({
     super.key,
@@ -55,6 +56,22 @@ class _LedgerScreenState extends State<LedgerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('سُجّل القيد. ينتظر تأكيد الطرف الآخر.')),
     );
+  }
+
+  Future<void> _showEntry(LedgerEntry entry, String currency) async {
+    _ledger.clearFormError();
+    final done = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _EntryActionsSheet(
+        controller: _ledger,
+        entry: entry,
+        currency: currency,
+      ),
+    );
+    if (done == null || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
   }
 
   @override
@@ -109,7 +126,11 @@ class _LedgerScreenState extends State<LedgerScreen> {
                         const _Empty()
                       else
                         for (final e in _ledger.entries)
-                          _EntryTile(entry: e, currency: ledger.currency),
+                          _EntryTile(
+                            entry: e,
+                            currency: ledger.currency,
+                            onTap: () => _showEntry(e, ledger.currency),
+                          ),
                     ],
                   ),
                 ),
@@ -199,40 +220,30 @@ String _side(int minor) => minor > 0
     : 'لا رصيد';
 
 class _EntryTile extends StatelessWidget {
-  const _EntryTile({required this.entry, required this.currency});
+  const _EntryTile({
+    required this.entry,
+    required this.currency,
+    required this.onTap,
+  });
 
   final LedgerEntry entry;
   final String currency;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final e = entry;
-    final gave = e.myDeltaMinor > 0;
     final voided = e.status == EntryStatus.voided;
-    final d = e.occurredOn;
-    final status = switch (e.status) {
-      EntryStatus.pending =>
-        e.createdByMe ? 'بانتظار التأكيد' : 'بانتظار تأكيدك',
-      EntryStatus.confirmed => 'مؤكد',
-      EntryStatus.disputed => 'معترض عليه',
-      EntryStatus.voided => 'مسحوب',
-    };
-    final details = <String>[
-      if (e.note != null) e.note!,
-      '${d.day}/${d.month}/${d.year}',
-      e.createdByMe ? 'سجّلته أنت' : 'سجّله الطرف الآخر',
-      status,
-      if (e.responseNote != null) 'الرد: ${e.responseNote}',
-    ];
 
     return ListTile(
       key: Key('entry_${e.id}'),
+      onTap: onTap,
       leading: CircleAvatar(
-        child: Icon(gave ? Icons.call_made : Icons.call_received),
+        child: Icon(e.myDeltaMinor > 0 ? Icons.call_made : Icons.call_received),
       ),
       title: Text(
-        '${gave ? 'أعطيت' : 'أخذت'} ${formatMoney(e.myDeltaMinor, currency)}',
+        _entryTitle(e, currency),
         style: voided
             ? TextStyle(
                 decoration: TextDecoration.lineThrough,
@@ -240,7 +251,194 @@ class _EntryTile extends StatelessWidget {
               )
             : null,
       ),
-      subtitle: Text(details.join(' · ')),
+      subtitle: Text(_entryDetails(e).join(' · ')),
+    );
+  }
+}
+
+String _entryTitle(LedgerEntry e, String currency) =>
+    '${e.myDeltaMinor > 0 ? 'أعطيت' : 'أخذت'} '
+    '${formatMoney(e.myDeltaMinor, currency)}';
+
+List<String> _entryDetails(LedgerEntry e) {
+  final d = e.occurredOn;
+  return [
+    if (e.note != null) e.note!,
+    '${d.day}/${d.month}/${d.year}',
+    e.createdByMe ? 'سجّلته أنت' : 'سجّله الطرف الآخر',
+    switch (e.status) {
+      EntryStatus.pending =>
+        e.createdByMe ? 'بانتظار التأكيد' : 'بانتظار تأكيدك',
+      EntryStatus.confirmed => 'مؤكد',
+      EntryStatus.disputed => 'معترض عليه',
+      EntryStatus.voided => 'مسحوب',
+    },
+    if (e.responseNote != null) 'الرد: ${e.responseNote}',
+  ];
+}
+
+/// One entry's details and what I may do with it ([entryActions]). Pops
+/// with the message to show once an action went through.
+class _EntryActionsSheet extends StatefulWidget {
+  const _EntryActionsSheet({
+    required this.controller,
+    required this.entry,
+    required this.currency,
+  });
+
+  final LedgerController controller;
+  final LedgerEntry entry;
+  final String currency;
+
+  @override
+  State<_EntryActionsSheet> createState() => _EntryActionsSheetState();
+}
+
+class _EntryActionsSheetState extends State<_EntryActionsSheet> {
+  final _reason = TextEditingController();
+
+  /// The second step of a dispute (the reason) or a withdrawal (the warning).
+  EntryAction? _step;
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<bool> Function() action, String done) async {
+    final ok = await action();
+    if (ok && mounted) Navigator.of(context).pop(done);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = widget.controller;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        0,
+        16,
+        16 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: ListenableBuilder(
+        listenable: c,
+        builder: (context, _) {
+          // After a reload the entry may have changed under me.
+          final e = c.entries.firstWhere(
+            (x) => x.id == widget.entry.id,
+            orElse: () => widget.entry,
+          );
+          final actions = entryActions(e);
+          // A step the entry no longer allows (it changed) is dropped.
+          final step = actions.contains(_step) ? _step : null;
+          final muted = theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          );
+          final busy = c.saving;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                _entryTitle(e, widget.currency),
+                style: theme.textTheme.titleLarge,
+              ),
+              const SizedBox(height: 4),
+              Text(_entryDetails(e).join(' · '), style: muted),
+              const SizedBox(height: 16),
+              if (actions.isEmpty)
+                Text(
+                  e.status == EntryStatus.confirmed
+                      ? 'قيد مؤكد لا يُعدَّل. للتصحيح سجّل قيداً معاكساً.'
+                      : 'قيد مسحوب.',
+                  key: const Key('entry_final_note'),
+                  style: muted,
+                ),
+              if (step == EntryAction.dispute) ...[
+                TextField(
+                  key: const Key('dispute_reason_field'),
+                  controller: _reason,
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'سبب الاعتراض'),
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  key: const Key('send_dispute_button'),
+                  onPressed: busy
+                      ? null
+                      : () => _run(
+                          () => c.disputeEntry(e.id, _reason.text),
+                          'أُرسل الاعتراض.',
+                        ),
+                  child: const Text('إرسال الاعتراض'),
+                ),
+              ] else if (step == EntryAction.withdraw) ...[
+                Text(
+                  'سحب القيد نهائي، ولا يدخل في أي رصيد بعده.',
+                  style: muted,
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  key: const Key('confirm_withdraw_button'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: theme.colorScheme.error,
+                    foregroundColor: theme.colorScheme.onError,
+                  ),
+                  onPressed: busy
+                      ? null
+                      : () => _run(() => c.withdrawEntry(e.id), 'سُحب القيد.'),
+                  child: const Text('تأكيد السحب'),
+                ),
+              ] else ...[
+                if (actions.contains(EntryAction.confirm))
+                  FilledButton(
+                    key: const Key('confirm_entry_button'),
+                    onPressed: busy
+                        ? null
+                        : () =>
+                              _run(() => c.confirmEntry(e.id), 'أُكّد القيد.'),
+                    child: const Text('تأكيد'),
+                  ),
+                if (actions.contains(EntryAction.dispute)) ...[
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    key: const Key('dispute_entry_button'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    onPressed: busy
+                        ? null
+                        : () => setState(() => _step = EntryAction.dispute),
+                    child: const Text('اعتراض'),
+                  ),
+                ],
+                if (actions.contains(EntryAction.withdraw))
+                  OutlinedButton(
+                    key: const Key('withdraw_entry_button'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      foregroundColor: theme.colorScheme.error,
+                    ),
+                    onPressed: busy
+                        ? null
+                        : () => setState(() => _step = EntryAction.withdraw),
+                    child: const Text('سحب القيد'),
+                  ),
+              ],
+              if (c.formError != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  c.formError!,
+                  key: const Key('entry_error_text'),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
     );
   }
 }
