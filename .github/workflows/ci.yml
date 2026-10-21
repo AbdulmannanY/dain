@@ -56,6 +56,50 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.live
         run: flutter test test/live --dart-define=DAIN_LIVE=true --reporter=expanded
 
+  apk:
+    name: Android APK
+    # After the app job passes, on pushes and manual runs (not on PRs).
+    needs: app
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Read pinned Flutter version from .fvmrc
+        id: fvm
+        working-directory: .
+        run: echo "version=$(jq -r .flutter .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+          cache: true
+
+      - name: Get packages
+        run: flutter pub get
+
+      # Signed with the debug key (android/app/build.gradle.kts): fine for
+      # installing on a test phone, not for a store release.
+      - name: Build release APK
+        run: flutter build apk --release --build-number=${{ github.run_number }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dain-apk-${{ github.run_number }}
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
   share:
     name: Share page
     runs-on: ubuntu-latest
