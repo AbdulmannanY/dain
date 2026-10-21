@@ -102,12 +102,21 @@ jobs:
           KEY_PASSWORD: ${{ secrets.DAIN_KEY_PASSWORD }}
         run: |
           for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            # A space or line break pasted with a value breaks it; none of
+            # the four values (base64, generated passwords, alias) has one.
+            printf -v "$v" '%s' "$(printf '%s' "${!v}" | tr -d '[:space:]')"
             if [ -z "${!v}" ]; then
               echo "::error::secret DAIN_$v is missing (Settings -> Secrets and variables -> Actions)"
               exit 1
             fi
           done
           echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          # Fail here in seconds, not after a 4-minute Gradle build.
+          if ! keytool -list -keystore android/app/upload-keystore.jks \
+              -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null 2>&1; then
+            echo "::error::DAIN_KEYSTORE_PASSWORD or DAIN_KEY_ALIAS does not open DAIN_KEYSTORE_BASE64; paste them again from ~/.dain-keys/password.txt"
+            exit 1
+          fi
           {
             echo "storeFile=upload-keystore.jks"
             echo "storePassword=$KEYSTORE_PASSWORD"
