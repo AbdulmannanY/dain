@@ -91,10 +91,42 @@ jobs:
       - name: Get packages
         run: flutter pub get
 
-      # Signed with the debug key (android/app/build.gradle.kts): fine for
-      # installing on a test phone, not for a store release.
+      # The upload key lives only in repository secrets (made on the phone by
+      # dain-16-keystore.sh). A missing secret fails the job instead of
+      # silently signing with the debug key, which would block updates.
+      - name: Upload key from secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DAIN_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.DAIN_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.DAIN_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.DAIN_KEY_PASSWORD }}
+        run: |
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then
+              echo "::error::secret DAIN_$v is missing (Settings -> Secrets and variables -> Actions)"
+              exit 1
+            fi
+          done
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          {
+            echo "storeFile=upload-keystore.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
       - name: Build release APK
         run: flutter build apk --release --build-number=${{ github.run_number }}
+
+      - name: The APK is signed with the upload key, not the debug key
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)/apksigner"
+          certs="$("$apksigner" verify --print-certs build/app/outputs/flutter-apk/app-release.apk)"
+          echo "$certs" | grep -E "certificate (DN|SHA-256)"
+          echo "$certs" | grep -q "certificate DN: CN=Dain" || {
+            echo "::error::the APK is not signed with the Dain upload key"
+            exit 1
+          }
 
       - uses: actions/upload-artifact@v6
         with:
