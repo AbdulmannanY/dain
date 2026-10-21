@@ -19,13 +19,13 @@ class DainApp extends StatelessWidget {
       locale: const Locale('ar'),
       supportedLocales: const [Locale('ar')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
-      theme: _theme(Brightness.light),
-      darkTheme: _theme(Brightness.dark),
+      theme: theme(Brightness.light),
+      darkTheme: theme(Brightness.dark),
       home: SessionGate(controller: controller, ledgers: ledgers),
     );
   }
 
-  static ThemeData _theme(Brightness brightness) {
+  static ThemeData theme(Brightness brightness) {
     final scheme = ColorScheme.fromSeed(
       seedColor: const Color(0xFF0E6B4F),
       brightness: brightness,
