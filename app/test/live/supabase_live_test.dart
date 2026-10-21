@@ -74,6 +74,15 @@ class _Session {
     expect(c.linkedCount, isNotNull);
   }
 
+  /// The next app launch: start() with the saved session runs
+  /// link_my_ledgers() again, without a new OTP. Returns how many it linked.
+  Future<int> relaunch() async {
+    await controller.start();
+    expect(controller.error, isNull, reason: 'relaunch');
+    expect(controller.stage, SessionStage.ready);
+    return controller.linkedCount!;
+  }
+
   Future<void> close() async {
     await client.auth.signOut();
     await client.dispose();
@@ -83,16 +92,29 @@ class _Session {
 void main() {
   HttpOverrides.global = _EnvProxyOverrides();
 
+  // Supabase refuses another OTP for the same phone inside its resend window
+  // (over_sms_send_rate_limit), test numbers included. So each phone signs in
+  // once per run, and later links come from relaunch().
+  late _Session a;
+  late _Session b;
+
+  setUpAll(() async {
+    if (!_live) return;
+    a = _Session();
+    b = _Session();
+    await a.signIn('0500000001', 'تجربة أ');
+    await b.signIn('+966 50 000 0002', 'تجربة ب');
+  });
+
+  tearDownAll(() async {
+    if (!_live) return;
+    await a.close();
+    await b.close();
+  });
+
   test(
     'A records a ledger for B\'s phone; B signs in and it is linked to B',
     () async {
-      final a = _Session();
-      final b = _Session();
-      addTearDown(a.close);
-      addTearDown(b.close);
-
-      await a.signIn('0500000001', 'تجربة أ');
-
       // Setup through RLS as A: a new shop and a ledger in it for B's phone.
       // A new (owner, business) pair each run, so the unique key never stops it.
       final shop = await a.client
@@ -111,8 +133,7 @@ void main() {
           .single();
       expect(ledger['counterparty_id'], isNull);
 
-      await b.signIn('+966 50 000 0002', 'تجربة ب');
-      expect(b.controller.linkedCount, greaterThanOrEqualTo(1));
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
 
       // B can read the ledger only because link_my_ledgers() set
       // counterparty_id = B (ledgers_select policy).
@@ -137,12 +158,6 @@ void main() {
   test(
     'the ledger list shows the agreed balance from each side',
     () async {
-      final a = _Session();
-      final b = _Session();
-      addTearDown(a.close);
-      addTearDown(b.close);
-
-      await a.signIn('0500000001', 'تجربة أ');
       final shopName = 'live list ${DateTime.now().toUtc().toIso8601String()}';
       final shop = await a.client
           .from('businesses')
@@ -176,7 +191,7 @@ void main() {
         'amount_minor': 345,
       });
 
-      await b.signIn('0500000002', 'تجربة ب');
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
       await b.client.rpc<dynamic>(
         'respond_entry',
         params: {'p_entry_id': sale['id'], 'p_decision': 'confirmed'},
