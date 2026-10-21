@@ -1,0 +1,54 @@
+name: Share page deploy
+
+# Publishes share/ (the page a share link opens) to GitHub Pages:
+# https://abdulmannany.github.io/dain/#<token>
+# One-time setup: Settings -> Pages -> Source: GitHub Actions.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'share/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy share/
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Page logic tests
+        run: node --test share/dain-share.test.mjs
+
+      - name: Only the page itself goes online
+        run: |
+          mkdir _site
+          cp share/index.html share/dain-share.js _site/
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

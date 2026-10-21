@@ -56,6 +56,20 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.live
         run: flutter test test/live --dart-define=DAIN_LIVE=true --reporter=expanded
 
+  share:
+    name: Share page
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Page logic tests (no dependencies)
+        run: node --test share/dain-share.test.mjs
+
   db:
     name: Database schema tests
     runs-on: ubuntu-latest
