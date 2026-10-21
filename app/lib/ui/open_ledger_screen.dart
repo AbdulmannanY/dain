@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/phone_number.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/open_ledger_controller.dart';
 import 'common.dart';
@@ -97,7 +98,7 @@ class _OpenLedgerScreenState extends State<OpenLedgerScreen> {
           textDirection: TextDirection.ltr,
           decoration: const InputDecoration(
             labelText: 'رقم جواله',
-            hintText: '05XXXXXXXX',
+            hintText: phoneHint,
             hintTextDirection: TextDirection.ltr,
             helperText: 'يرى الدفتر عندما يدخل دائن بهذا الرقم.',
           ),

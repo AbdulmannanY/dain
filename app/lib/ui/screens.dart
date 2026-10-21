@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../core/phone_number.dart';
+
 import '../session/session_controller.dart';
 
 /// Shared frame: a centred column with a title, a subtitle, the stage's
@@ -123,7 +125,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
           autofillHints: const [AutofillHints.telephoneNumber],
           decoration: const InputDecoration(
             labelText: 'رقم الجوال',
-            hintText: '05XXXXXXXX',
+            hintText: phoneHint,
             hintTextDirection: TextDirection.ltr,
           ),
           onSubmitted: (_) => _submit(),

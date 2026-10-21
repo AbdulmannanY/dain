@@ -19,6 +19,29 @@ void main() {
       }
     });
 
+    test('Yemeni local and international forms give the same digits', () {
+      const want = '967774040697';
+      for (final input in [
+        '774040697',
+        '0774040697',
+        '967774040697',
+        '+967774040697',
+        '00967774040697',
+        '+967 77 404 0697',
+        '٧٧٤٠٤٠٦٩٧',
+      ]) {
+        expect(normalizePhone(input), want, reason: input);
+      }
+    });
+
+    test('a bare number is never read as another country', () {
+      // Before: 774040697 went out as +7 74040697 (Russia).
+      expect(normalizePhone('774040697'), isNot('774040697'));
+      expect(normalizePhone('201001234567'), isNull); // Egypt without '+'
+      expect(normalizePhone('+201001234567'), '201001234567');
+      expect(normalizePhone('00201001234567'), '201001234567');
+    });
+
     test('Arabic-Indic and Persian digits', () {
       expect(normalizePhone('٠٥٠٠٠٠٠٠٠٢'), '966500000002');
       expect(normalizePhone('۰۵۰۰۰۰۰۰۰۲'), '966500000002');
@@ -39,6 +62,11 @@ void main() {
         '+966 5000000012', // one digit long
         'abc0500000001',
         '+1234567890123456', // longer than E.164
+        '674040697', // 9 digits: neither 5 (Saudi) nor 7 (Yemeni)
+        '74040697', // Yemeni, one digit short
+        '7740406970', // Yemeni, one digit long
+        '+967 1 234567', // Yemeni landline
+        '96777404069', // Yemeni with code, one digit short
       ]) {
         expect(normalizePhone(input), isNull, reason: input);
       }

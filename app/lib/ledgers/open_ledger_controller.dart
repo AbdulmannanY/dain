@@ -88,7 +88,7 @@ class OpenLedgerController extends ChangeNotifier {
     }
     final normalized = normalizePhone(phone);
     if (normalized == null) {
-      return _fail('أدخل رقم جوال صحيحاً، مثل 05XXXXXXXX.');
+      return _fail(invalidPhoneMessage);
     }
     // The database accepts it, but link_my_ledgers() never links a ledger
     // to its own owner, so it would stay unjoined forever.

@@ -69,7 +69,7 @@ class SessionController extends ChangeNotifier {
   Future<void> requestCode(String input) async {
     final phone = normalizePhone(input);
     if (phone == null) {
-      _fail('أدخل رقم جوال صحيحاً، مثل 05XXXXXXXX.');
+      _fail(invalidPhoneMessage);
       return;
     }
     await _run(() async {

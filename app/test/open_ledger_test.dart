@@ -1,4 +1,5 @@
 import 'package:dain/app.dart';
+import 'package:dain/core/phone_number.dart';
 import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter/material.dart';
@@ -164,6 +165,12 @@ void main() {
     expect(inTile('new-1', 'محل الوفاء · لم ينضم بعد'), findsOneWidget);
   });
 
+  testWidgets('a Yemeni number opens a ledger stored with 967', (tester) async {
+    await openForm(tester);
+    await fill(tester, phone: '٧٧٠٨٢٧٨٤٢');
+    expect(ledgers.opened, [('', '967770827842')]);
+  });
+
   testWidgets('checks the name, the phone and the new shop name', (
     tester,
   ) async {
@@ -172,7 +179,7 @@ void main() {
     expect(find.text('اكتب اسم الطرف الآخر (حتى 80 حرفاً).'), findsOneWidget);
 
     await fill(tester, phone: '0112345678');
-    expect(find.text('أدخل رقم جوال صحيحاً، مثل 05XXXXXXXX.'), findsOneWidget);
+    expect(find.text(invalidPhoneMessage), findsOneWidget);
 
     await fill(tester, phone: '0501234567', owner: 'owner_new_shop');
     expect(find.text('اكتب اسم المحل (حتى 80 حرفاً).'), findsOneWidget);

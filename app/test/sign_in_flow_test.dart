@@ -1,4 +1,5 @@
 import 'package:dain/app.dart';
+import 'package:dain/core/phone_number.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -93,12 +94,24 @@ void main() {
     expect(find.byKey(const Key('linked_banner')), findsNothing);
   });
 
+  testWidgets('a Yemeni number is sent with 967, not as another country', (
+    tester,
+  ) async {
+    auth = FakeAuth(codes: {'967774040697': '123456'});
+    profiles = FakeProfiles(auth, names: {'user-967774040697': 'عبدالرحمن'});
+    await launch(tester);
+    await enter(tester, 'phone_field', '774040697', 'send_code_button');
+    expect(auth.sent, ['967774040697']);
+    await enter(tester, 'code_field', '123456', 'verify_button');
+    expect(controller.stage, SessionStage.ready);
+  });
+
   testWidgets('invalid phone never reaches the server', (tester) async {
     await launch(tester);
     await enter(tester, 'phone_field', '0112345678', 'send_code_button');
 
     expect(auth.sent, isEmpty);
-    expect(find.byKey(const Key('error_text')), findsOneWidget);
+    expect(find.text(invalidPhoneMessage), findsOneWidget);
     expect(controller.stage, SessionStage.enterPhone);
   });
 
