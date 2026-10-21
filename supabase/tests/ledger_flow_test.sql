@@ -179,4 +179,32 @@ update public.ledgers set counterparty_phone = '966500000033' where id = (select
 reset role;
 select t.ok((select count(*) from public.share_links) = 0, 'phone correction deletes the share link');
 
+-- ================= 7. a dispute needs its reason (20261021000000) =================
+:as_A
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 1500, 'reason test' from t.ids where k = 'L_B';
+insert into t.ids select 'E6', id from public.entries where note = 'reason test';
+:as_B
+select t.err($$select public.respond_entry((select v from t.ids where k = 'E6'), 'disputed')$$,
+             '22023', 'a dispute without a reason is refused');
+select t.err($$select public.respond_entry((select v from t.ids where k = 'E6'), 'disputed', '   ')$$,
+             '22023', 'a blank reason is refused');
+select t.ok(public.respond_entry((select v from t.ids where k = 'E6'), 'disputed', '  wrong amount ') = 'disputed',
+            'a dispute with a reason goes through');
+select t.ok((select response_note from public.entries where id = (select v from t.ids where k = 'E6')) = 'wrong amount',
+            'the reason is stored trimmed');
+select t.ok(public.respond_entry((select v from t.ids where k = 'E6'), 'confirmed') = 'confirmed',
+            'a disputed entry is still confirmed without a note');
+:as_A
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 800, 'link reason test' from t.ids where k = 'L_C';
+insert into t.ids select 'E7', id from public.entries where note = 'link reason test';
+insert into t.tokens select 'C2', public.create_share_link((select v from t.ids where k = 'L_C'));
+:as_anon
+select t.err($$select public.respond_by_token((select v from t.tokens where k = 'C2'), (select v from t.ids where k = 'E7'), 'disputed')$$,
+             '22023', 'a dispute by link without a reason is refused');
+select t.ok(public.respond_by_token((select v from t.tokens where k = 'C2'), (select v from t.ids where k = 'E7'), 'disputed', 'not mine') = 'disputed',
+            'a dispute by link with a reason goes through');
+reset role;
+
 \echo ALL TESTS PASSED

@@ -613,4 +613,119 @@ void main() {
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'the database itself refuses a dispute without a reason',
+    () async {
+      // Setup through RLS as A: a new shop ledger for B's phone, linked to B.
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live reason ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      await aView.load();
+      expect(await aView.addEntry(iGave: true, amount: '15'), isTrue);
+      expect(await aView.addEntry(iGave: true, amount: '8'), isTrue);
+      final [byLink, inApp] = aView.entries; // newest first
+
+      const applyFirst =
+          'apply supabase/migrations/20261021000000_dispute_reason.sql '
+          'in the Supabase SQL Editor first';
+      Future<String?> code(Future<dynamic> call) async {
+        try {
+          await call;
+          return null;
+        } on PostgrestException catch (e) {
+          return e.code;
+        }
+      }
+
+      // B calls respond_entry directly, skipping the app's own check.
+      for (final note in [null, '   ']) {
+        expect(
+          await code(
+            b.client.rpc<dynamic>(
+              'respond_entry',
+              params: {
+                'p_entry_id': inApp.id,
+                'p_decision': 'disputed',
+                'p_note': note,
+              },
+            ),
+          ),
+          '22023',
+          reason: '$applyFirst (note: $note)',
+        );
+      }
+      await b.client.rpc<dynamic>(
+        'respond_entry',
+        params: {
+          'p_entry_id': inApp.id,
+          'p_decision': 'disputed',
+          'p_note': '  ليس 15 ',
+        },
+      );
+      final row = await a.client
+          .from('entries')
+          .select('status, response_note')
+          .eq('id', inApp.id)
+          .single();
+      expect(row, {'status': 'disputed', 'response_note': 'ليس 15'});
+
+      // The same through the share link, as anon.
+      final url = await aView.createShareLink();
+      final token = url!.substring(url.indexOf('#') + 1);
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      expect(
+        await code(
+          anon.rpc<dynamic>(
+            'respond_by_token',
+            params: {
+              'p_token': token,
+              'p_entry_id': byLink.id,
+              'p_decision': 'disputed',
+            },
+          ),
+        ),
+        '22023',
+        reason: applyFirst,
+      );
+      expect(
+        await anon.rpc<dynamic>(
+          'respond_by_token',
+          params: {
+            'p_token': token,
+            'p_entry_id': byLink.id,
+            'p_decision': 'disputed',
+            'p_note': 'ليس لي',
+          },
+        ),
+        'disputed',
+      );
+      await aView.revokeShareLink();
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
