@@ -283,6 +283,44 @@ class FakeLedgers implements LedgerRepository {
   Future<void> revokeShareLink(String ledgerId) async =>
       shareLinks.remove(ledgerId);
 
+  /// ledger id -> times a reminder was marked sent.
+  final reminded = <String, int>{};
+
+  @override
+  Future<void> setReminder(String ledgerId, int? days) async =>
+      _replace(ledgerId, (l) => _withReminder(l, days, l.lastRemindedAt));
+
+  @override
+  Future<void> markReminded(String ledgerId) async {
+    reminded.update(ledgerId, (n) => n + 1, ifAbsent: () => 1);
+    _replace(
+      ledgerId,
+      (l) => _withReminder(l, l.remindEveryDays, DateTime.now()),
+    );
+  }
+
+  void _replace(String id, LedgerSummary Function(LedgerSummary) change) =>
+      ledgers = [for (final l in ledgers) l.id == id ? change(l) : l];
+
+  static LedgerSummary _withReminder(
+    LedgerSummary l,
+    int? days,
+    DateTime? last,
+  ) => LedgerSummary(
+    id: l.id,
+    iAmOwner: l.iAmOwner,
+    title: l.title,
+    subtitle: l.subtitle,
+    currency: l.currency,
+    myConfirmedMinor: l.myConfirmedMinor,
+    myOpenMinor: l.myOpenMinor,
+    pendingCount: l.pendingCount,
+    disputedCount: l.disputedCount,
+    otherPartyJoined: l.otherPartyJoined,
+    remindEveryDays: days,
+    lastRemindedAt: last,
+  );
+
   /// Shops holding ledgers: deleting one is refused like the FK does.
   final shopsWithLedgers = <String>{};
 

@@ -207,4 +207,28 @@ select t.ok(public.respond_by_token((select v from t.tokens where k = 'C2'), (se
             'a dispute by link with a reason goes through');
 reset role;
 
+-- ================= 8. reminders (20261022000000) =================
+:as_A
+update public.ledgers set remind_every_days = 7 where id = (select v from t.ids where k = 'L_B');
+select t.ok((select remind_every_days from public.ledgers where id = (select v from t.ids where k = 'L_B')) = 7,
+            'the owner sets a reminder every 7 days');
+select t.err($$update public.ledgers set remind_every_days = 0 where id = (select v from t.ids where k = 'L_B')$$,
+             '23514', 'a reminder period of 0 days is refused');
+select t.err($$update public.ledgers set last_reminded_at = now() where id = (select v from t.ids where k = 'L_B')$$,
+             '42501', 'last_reminded_at is not written directly');
+select t.ok(public.mark_reminded((select v from t.ids where k = 'L_B')) is not null, 'the owner marks a reminder sent');
+select t.ok((select last_reminded_at from public.ledgers where id = (select v from t.ids where k = 'L_B'))
+              between now() - interval '1 minute' and now(), 'it is stamped with the server time');
+:as_B
+update public.ledgers set remind_every_days = 1 where id = (select v from t.ids where k = 'L_B');
+select t.err($$select public.mark_reminded((select v from t.ids where k = 'L_B'))$$,
+             'P0002', 'the counterparty cannot mark a reminder');
+:as_A
+select t.ok((select remind_every_days from public.ledgers where id = (select v from t.ids where k = 'L_B')) = 7,
+            'the counterparty cannot change the reminder period');
+:as_anon
+select t.err($$select public.mark_reminded((select v from t.ids where k = 'L_B'))$$,
+             '42501', 'anon cannot mark a reminder');
+reset role;
+
 \echo ALL TESTS PASSED

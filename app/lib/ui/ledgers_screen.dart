@@ -265,6 +265,7 @@ class _LedgerTile extends StatelessWidget {
     final notes = <String>[
       if (l.subtitle != null) l.subtitle!,
       if (!l.otherPartyJoined) 'لم ينضم بعد',
+      if (reminderDue(l, DateTime.now())) 'تذكير مستحق',
       if (l.pendingCount > 0) '${l.pendingCount} بانتظار التأكيد',
       if (l.disputedCount > 0) '${l.disputedCount} معترض عليه',
     ];

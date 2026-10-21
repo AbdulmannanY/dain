@@ -115,6 +115,35 @@ class LedgerController extends ChangeNotifier {
   Future<bool> withdrawEntry(String entryId) =>
       _write(() => _repository.voidEntry(entryId));
 
+  /// The owner's reminder is due now ([reminderDue]).
+  bool get reminderIsDue {
+    final ledger = _ledger;
+    return ledger != null && reminderDue(ledger, _now());
+  }
+
+  /// The owner sets the reminder period: 1..90 days, or null for off.
+  Future<bool> setReminder(int? days) async {
+    final ledger = _ledger;
+    if (ledger == null || !ledger.iAmOwner) return false;
+    return _write(() => _repository.setReminder(ledger.id, days));
+  }
+
+  /// Makes a fresh share link, hands the reminder message to [copy], then
+  /// records the reminder (the server stamps the time). Returns the message,
+  /// or null with [formError].
+  Future<String?> sendReminder(
+    Future<void> Function(String message) copy,
+  ) async {
+    final ledger = _ledger;
+    if (ledger == null || !ledger.iAmOwner) return null;
+    final url = await createShareLink();
+    if (url == null) return null;
+    final message = reminderMessage(ledger, url);
+    await copy(message);
+    final ok = await _write(() => _repository.markReminded(ledger.id));
+    return ok ? message : null;
+  }
+
   String? _shareUrl;
 
   /// The link created in this screen; null before one is created and after

@@ -75,6 +75,32 @@ class _LedgerScreenState extends State<LedgerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
   }
 
+  Future<void> _remind() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final sent = await _ledger.sendReminder(
+      (text) => Clipboard.setData(ClipboardData(text: text)),
+    );
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          sent != null
+              ? 'نُسخت رسالة التذكير. أرسلها له عبر واتساب أو رسالة.'
+              : _ledger.formError ?? 'تعذّر إتمام العملية. حاول مجدداً.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _reminderSettings() async {
+    _ledger.clearFormError();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _ReminderSheet(controller: _ledger),
+    );
+  }
+
   Future<void> _share() async {
     _ledger.clearFormError();
     await showModalBottomSheet<void>(
@@ -95,6 +121,17 @@ class _LedgerScreenState extends State<LedgerScreen> {
           appBar: AppBar(
             title: Text(ledger?.title ?? widget.title ?? ''),
             actions: [
+              if (ledger != null && ledger.iAmOwner)
+                IconButton(
+                  key: const Key('reminder_button'),
+                  tooltip: 'التذكير',
+                  icon: Icon(
+                    ledger.remindEveryDays == null
+                        ? Icons.notifications_none
+                        : Icons.notifications_active_outlined,
+                  ),
+                  onPressed: _reminderSettings,
+                ),
               if (ledger != null && ledger.iAmOwner)
                 IconButton(
                   key: const Key('share_link_button'),
@@ -143,7 +180,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.only(bottom: 24),
                     children: [
-                      _Balance(ledger: ledger, refreshError: _ledger.error),
+                      _Balance(
+                        ledger: ledger,
+                        refreshError: _ledger.error,
+                        onRemind: _ledger.reminderIsDue && !_ledger.saving
+                            ? _remind
+                            : null,
+                      ),
                       if (_ledger.entries.isEmpty)
                         const _Empty()
                       else
@@ -163,10 +206,17 @@ class _LedgerScreenState extends State<LedgerScreen> {
 }
 
 class _Balance extends StatelessWidget {
-  const _Balance({required this.ledger, required this.refreshError});
+  const _Balance({
+    required this.ledger,
+    required this.refreshError,
+    required this.onRemind,
+  });
 
   final LedgerSummary ledger;
   final String? refreshError;
+
+  /// Set while the owner's reminder is due.
+  final VoidCallback? onRemind;
 
   @override
   Widget build(BuildContext context) {
@@ -217,6 +267,15 @@ class _Balance extends StatelessWidget {
                   'برقمه.',
                   key: const Key('not_joined_note'),
                   style: muted,
+                ),
+              ],
+              if (onRemind != null) ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  key: const Key('send_reminder_button'),
+                  onPressed: onRemind,
+                  icon: const Icon(Icons.notifications_active_outlined),
+                  label: const Text('تذكير مستحق: انسخ الرسالة'),
                 ),
               ],
               if (refreshError != null) ...[
@@ -297,6 +356,85 @@ List<String> _entryDetails(LedgerEntry e) {
     },
     if (e.responseNote != null) 'الرد: ${e.responseNote}',
   ];
+}
+
+/// The owner's reminder period. A reminder is due when the other party owes
+/// on agreed entries and the period has passed since the last one.
+class _ReminderSheet extends StatelessWidget {
+  const _ReminderSheet({required this.controller});
+
+  final LedgerController controller;
+
+  static const _choices = <(int?, String)>[
+    (null, 'إيقاف'),
+    (3, 'كل 3 أيام'),
+    (7, 'كل أسبوع'),
+    (14, 'كل أسبوعين'),
+    (30, 'كل شهر'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = controller;
+    final muted = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: ListenableBuilder(
+        listenable: c,
+        builder: (context, _) {
+          final l = c.ledger;
+          final last = l?.lastRemindedAt?.toLocal();
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('التذكير', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 4),
+              Text(
+                'يظهر «تذكير مستحق» حين يكون لك عليه رصيد متفق عليه ومرّت المدة. '
+                'تُنسخ رسالة فيها رابط جديد وترسلها أنت، والرابط الجديد يُبطل '
+                'السابق.',
+                style: muted,
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final (days, label) in _choices)
+                    ChoiceChip(
+                      key: Key('remind_${days ?? 'off'}'),
+                      label: Text(label),
+                      selected: l?.remindEveryDays == days,
+                      onSelected: c.saving ? null : (_) => c.setReminder(days),
+                    ),
+                ],
+              ),
+              if (last != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  'آخر تذكير: ${last.day}/${last.month}/${last.year}',
+                  key: const Key('last_reminder_text'),
+                  style: muted,
+                ),
+              ],
+              if (c.formError != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  c.formError!,
+                  key: const Key('entry_error_text'),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// The owner's link for the other party: they open the ledger in a browser

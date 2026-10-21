@@ -1,5 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/money.dart';
+
 /// One ledger as the signed-in person sees it. The database keeps balances
 /// relative to the ledger OWNER; every amount here is already turned to the
 /// viewer's side: positive = the other party owes me ("لك"),
@@ -16,6 +18,8 @@ class LedgerSummary {
     required this.pendingCount,
     required this.disputedCount,
     required this.otherPartyJoined,
+    this.remindEveryDays,
+    this.lastRemindedAt,
   });
 
   final String id;
@@ -41,6 +45,32 @@ class LedgerSummary {
   /// False while the counterparty has not signed in with that phone yet
   /// (owner's view only; always true for the counterparty).
   final bool otherPartyJoined;
+
+  /// The owner's reminder period in days (1..90), null when off.
+  final int? remindEveryDays;
+
+  /// When the owner last sent a reminder (`mark_reminded`), null if never.
+  final DateTime? lastRemindedAt;
+}
+
+/// A reminder is due for the owner when one is set, the other party owes
+/// the owner on agreed entries, and the last reminder (if any) is at least
+/// [LedgerSummary.remindEveryDays] old.
+bool reminderDue(LedgerSummary l, DateTime now) {
+  final days = l.remindEveryDays;
+  if (!l.iAmOwner || days == null || l.myConfirmedMinor <= 0) return false;
+  final last = l.lastRemindedAt;
+  return last == null || !now.isBefore(last.add(Duration(days: days)));
+}
+
+/// The message the owner sends, with the share link [url].
+String reminderMessage(LedgerSummary l, String url) {
+  final shop = l.subtitle == null ? '' : ' مع ${l.subtitle}';
+  return 'السلام عليكم ${l.title}،\n'
+      'تذكير بالرصيد المتفق عليه$shop: '
+      '${formatMoney(l.myConfirmedMinor, l.currency)} عليك.\n'
+      'التفاصيل، وتأكيد القيود أو الاعتراض عليها:\n'
+      '$url';
 }
 
 /// Turns PostgREST rows into summaries for [myId]. A ledger missing from
@@ -77,6 +107,12 @@ List<LedgerSummary> buildSummaries({
         pendingCount: n('pending_count'),
         disputedCount: n('disputed_count'),
         otherPartyJoined: !iAmOwner || l['counterparty_id'] != null,
+        remindEveryDays: iAmOwner
+            ? (l['remind_every_days'] as num?)?.toInt()
+            : null,
+        lastRemindedAt: iAmOwner && l['last_reminded_at'] != null
+            ? DateTime.parse(l['last_reminded_at'] as String)
+            : null,
       ),
     );
   }
@@ -236,6 +272,13 @@ abstract interface class LedgerRepository {
   /// The owner turns the link off (`revoke_share_link`).
   Future<void> revokeShareLink(String ledgerId);
 
+  /// The owner sets the reminder period in days (1..90), or null for off.
+  Future<void> setReminder(String ledgerId, int? days);
+
+  /// The owner records a reminder sent now, by the server's clock
+  /// (`mark_reminded`).
+  Future<void> markReminded(String ledgerId);
+
   /// My verified phone as E.164 digits without '+', the form
   /// `link_my_ledgers()` matches; null when unknown.
   String? get myPhone;
@@ -294,6 +337,7 @@ class SupabaseLedgerRepository implements LedgerRepository {
         .from('ledgers')
         .select(
           'id, owner_id, counterparty_id, counterparty_name, currency, '
+          'remind_every_days, last_reminded_at, '
           'business:businesses(name), '
           'owner:profiles!ledgers_owner_id_fkey(full_name)',
         );
@@ -384,6 +428,24 @@ class SupabaseLedgerRepository implements LedgerRepository {
   Future<void> revokeShareLink(String ledgerId) async {
     await _client.rpc<dynamic>(
       'revoke_share_link',
+      params: {'p_ledger_id': ledgerId},
+    );
+  }
+
+  @override
+  Future<void> setReminder(String ledgerId, int? days) async {
+    final rows = await _client
+        .from('ledgers')
+        .update({'remind_every_days': days})
+        .eq('id', ledgerId)
+        .select('id');
+    if (rows.isEmpty) throw StateError('ledger not found');
+  }
+
+  @override
+  Future<void> markReminded(String ledgerId) async {
+    await _client.rpc<dynamic>(
+      'mark_reminded',
       params: {'p_ledger_id': ledgerId},
     );
   }

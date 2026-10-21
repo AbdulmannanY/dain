@@ -772,4 +772,110 @@ void main() {
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'reminders: the owner sets one, sends it with a fresh link, only once due',
+    () async {
+      // Setup through RLS as A: a new shop ledger for B's phone, linked to B.
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live remind ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      await aView.load();
+      expect(await aView.addEntry(iGave: true, amount: '10'), isTrue);
+      await bView.load();
+      expect(await bView.confirmEntry(bView.entries.single.id), isTrue);
+
+      // Off by default; set every 7 days: never sent and owed, so due.
+      await aView.load();
+      expect(aView.reminderIsDue, isFalse);
+      expect(await aView.setReminder(7), isTrue, reason: aView.formError);
+      expect(aView.ledger!.remindEveryDays, 7);
+      expect(aView.reminderIsDue, isTrue);
+
+      final copied = <String>[];
+      final message = await aView.sendReminder((t) async => copied.add(t));
+      expect(
+        message,
+        isNotNull,
+        reason:
+            '${aView.formError}: apply supabase/migrations/'
+            '20261022000000_mark_reminded.sql in the SQL Editor first',
+      );
+      expect(copied, [message]);
+      expect(message, contains('10 ر.س عليك'));
+      final token = message!.substring(message.indexOf('#') + 1);
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      final page = await anon.rpc<dynamic>(
+        'get_shared_ledger',
+        params: {'p_token': token},
+      );
+      expect((page as Map)['confirmed_balance_minor'], 1000);
+
+      // Stamped by the server just now: no longer due.
+      final last = aView.ledger!.lastRemindedAt!;
+      expect(DateTime.now().difference(last).inMinutes.abs(), lessThan(5));
+      expect(aView.reminderIsDue, isFalse);
+
+      // B sees no reminder, and the database refuses B's attempts.
+      await bView.load();
+      expect(bView.ledger!.remindEveryDays, isNull);
+      expect(await bView.setReminder(1), isFalse);
+      final changed = await b.client
+          .from('ledgers')
+          .update({'remind_every_days': 1})
+          .eq('id', ledgerId)
+          .select('id');
+      expect(changed, isEmpty);
+      String? code;
+      try {
+        await b.client.rpc<dynamic>(
+          'mark_reminded',
+          params: {'p_ledger_id': ledgerId},
+        );
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(
+        code,
+        'P0002',
+        reason:
+            'apply supabase/migrations/20261022000000_mark_reminded.sql '
+            'in the Supabase SQL Editor first',
+      );
+
+      expect(await aView.setReminder(null), isTrue);
+      expect(aView.ledger!.remindEveryDays, isNull);
+      await aView.revokeShareLink();
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
