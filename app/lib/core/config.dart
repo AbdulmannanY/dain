@@ -11,4 +11,13 @@ abstract final class DainConfig {
     'DAIN_SUPABASE_KEY',
     defaultValue: 'sb_publishable_JTVwmwscU9kAwi3PM2EQMQ_shfAYx5X',
   );
+
+  /// The web confirmation page (share/ in the repository, on GitHub Pages).
+  /// The token goes after '#', so it never reaches a server log.
+  static const shareBaseUrl = String.fromEnvironment(
+    'DAIN_SHARE_URL',
+    defaultValue: 'https://abdulmannany.github.io/dain/',
+  );
+
+  static String shareUrl(String token) => '$shareBaseUrl#$token';
 }

@@ -116,6 +116,10 @@ class FakeLedgers implements LedgerRepository {
   /// (entry id, 'confirmed' | 'disputed' | 'voided', note) of every action.
   final actions = <(String, String, String?)>[];
 
+  /// ledger id -> its live link token; created ones get tok1, tok2...
+  final shareLinks = <String, String>{};
+  int _tokens = 0;
+
   @override
   Future<List<LedgerSummary>> fetchMine() async {
     fetches++;
@@ -264,6 +268,20 @@ class FakeLedgers implements LedgerRepository {
     }
     throw const PostgrestException(message: 'entry not found', code: 'P0002');
   }
+
+  @override
+  Future<String> createShareLink(String ledgerId, {int days = 30}) async {
+    final error = failNextActionWith;
+    if (error != null) {
+      failNextActionWith = null;
+      throw error;
+    }
+    return shareLinks[ledgerId] = 'tok${++_tokens}';
+  }
+
+  @override
+  Future<void> revokeShareLink(String ledgerId) async =>
+      shareLinks.remove(ledgerId);
 
   @override
   Future<List<Business>> fetchMyBusinesses() async {

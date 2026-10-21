@@ -228,6 +228,14 @@ abstract interface class LedgerRepository {
   /// The creator withdraws a pending or disputed entry (`void_entry`).
   Future<void> voidEntry(String entryId);
 
+  /// The owner creates the link for the other party, replacing any earlier
+  /// one (`create_share_link`). Returns the token; only its hash is stored,
+  /// so it cannot be shown again.
+  Future<String> createShareLink(String ledgerId, {int days = 30});
+
+  /// The owner turns the link off (`revoke_share_link`).
+  Future<void> revokeShareLink(String ledgerId);
+
   /// My verified phone as E.164 digits without '+', the form
   /// `link_my_ledgers()` matches; null when unknown.
   String? get myPhone;
@@ -354,6 +362,23 @@ class SupabaseLedgerRepository implements LedgerRepository {
   @override
   Future<void> voidEntry(String entryId) async {
     await _client.rpc<dynamic>('void_entry', params: {'p_entry_id': entryId});
+  }
+
+  @override
+  Future<String> createShareLink(String ledgerId, {int days = 30}) async {
+    final token = await _client.rpc<dynamic>(
+      'create_share_link',
+      params: {'p_ledger_id': ledgerId, 'p_days': days},
+    );
+    return token as String;
+  }
+
+  @override
+  Future<void> revokeShareLink(String ledgerId) async {
+    await _client.rpc<dynamic>(
+      'revoke_share_link',
+      params: {'p_ledger_id': ledgerId},
+    );
   }
 
   @override

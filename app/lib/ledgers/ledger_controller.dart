@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../core/config.dart';
 import '../core/errors.dart';
 import '../core/money.dart';
 import '../data/ledger_repository.dart';
@@ -114,10 +115,50 @@ class LedgerController extends ChangeNotifier {
   Future<bool> withdrawEntry(String entryId) =>
       _write(() => _repository.voidEntry(entryId));
 
-  /// Runs [action] with [saving] set, then reloads. On failure keeps the
+  String? _shareUrl;
+
+  /// The link created in this screen; null before one is created and after
+  /// it is revoked (the token cannot be read back).
+  String? get shareUrl => _shareUrl;
+
+  /// Creates a new link for the other party (owner only) and returns it. Any
+  /// earlier link stops working.
+  Future<String?> createShareLink() async {
+    final ledger = _ledger;
+    if (ledger == null || !ledger.iAmOwner) return null;
+    String? token;
+    final ok = await _write(
+      () async => token = await _repository.createShareLink(ledger.id),
+      reload: false,
+    );
+    if (!ok) return null;
+    _shareUrl = DainConfig.shareUrl(token!);
+    _notify();
+    return _shareUrl;
+  }
+
+  Future<bool> revokeShareLink() async {
+    final ledger = _ledger;
+    if (ledger == null || !ledger.iAmOwner) return false;
+    final ok = await _write(
+      () => _repository.revokeShareLink(ledger.id),
+      reload: false,
+    );
+    if (ok) {
+      _shareUrl = null;
+      _notify();
+    }
+    return ok;
+  }
+
+  /// Runs [action] with [saving] set, then reloads unless [reload] is false
+  /// (a share link changes nothing on screen). On failure keeps the
   /// sheet open with [formError]; when the entry changed or vanished under
   /// me (the other side acted first), reloads so the screen shows its state.
-  Future<bool> _write(Future<void> Function() action) async {
+  Future<bool> _write(
+    Future<void> Function() action, {
+    bool reload = true,
+  }) async {
     if (_saving) return false;
     _saving = true;
     _formError = null;
@@ -141,7 +182,7 @@ class LedgerController extends ChangeNotifier {
       _notify();
       if (stale) await load();
     }
-    await load();
+    if (reload) await load();
     return true;
   }
 

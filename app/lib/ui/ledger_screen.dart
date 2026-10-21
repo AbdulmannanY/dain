@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/money.dart';
 import '../data/ledger_repository.dart';
@@ -74,6 +75,16 @@ class _LedgerScreenState extends State<LedgerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
   }
 
+  Future<void> _share() async {
+    _ledger.clearFormError();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _ShareSheet(controller: _ledger),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -81,7 +92,18 @@ class _LedgerScreenState extends State<LedgerScreen> {
       builder: (context, _) {
         final ledger = _ledger.ledger;
         return Scaffold(
-          appBar: AppBar(title: Text(ledger?.title ?? widget.title ?? '')),
+          appBar: AppBar(
+            title: Text(ledger?.title ?? widget.title ?? ''),
+            actions: [
+              if (ledger != null && ledger.iAmOwner)
+                IconButton(
+                  key: const Key('share_link_button'),
+                  tooltip: 'رابط للطرف الآخر',
+                  icon: const Icon(Icons.link),
+                  onPressed: _share,
+                ),
+            ],
+          ),
           bottomNavigationBar: ledger == null
               ? null
               : SafeArea(
@@ -275,6 +297,90 @@ List<String> _entryDetails(LedgerEntry e) {
     },
     if (e.responseNote != null) 'الرد: ${e.responseNote}',
   ];
+}
+
+/// The owner's link for the other party: they open the ledger in a browser
+/// and confirm or dispute my entries without the app.
+class _ShareSheet extends StatelessWidget {
+  const _ShareSheet({required this.controller});
+
+  final LedgerController controller;
+
+  Future<void> _create() async {
+    final url = await controller.createShareLink();
+    if (url != null) await Clipboard.setData(ClipboardData(text: url));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = controller;
+    final muted = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: ListenableBuilder(
+        listenable: c,
+        builder: (context, _) {
+          final url = c.shareUrl;
+          final busy = c.saving;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('رابط للطرف الآخر', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 4),
+              Text(
+                'يفتح به ${c.ledger?.title ?? 'الطرف الآخر'} الدفتر في المتصفح، '
+                'ويؤكد قيودك أو يعترض عليها دون التطبيق. صالح 30 يوماً، وإنشاء '
+                'رابط جديد يُبطل السابق.',
+                style: muted,
+              ),
+              const SizedBox(height: 16),
+              if (url != null) ...[
+                SelectableText(
+                  url,
+                  key: const Key('share_link_text'),
+                  textDirection: TextDirection.ltr,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'نُسخ الرابط. أرسله له عبر واتساب أو رسالة.',
+                  key: const Key('share_link_copied'),
+                  style: muted,
+                ),
+                const SizedBox(height: 12),
+              ],
+              FilledButton(
+                key: const Key('create_link_button'),
+                onPressed: busy ? null : _create,
+                child: Text(url == null ? 'إنشاء الرابط ونسخه' : 'رابط جديد'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                key: const Key('revoke_link_button'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(52),
+                  foregroundColor: theme.colorScheme.error,
+                ),
+                onPressed: busy ? null : c.revokeShareLink,
+                child: const Text('إيقاف الرابط'),
+              ),
+              if (c.formError != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  c.formError!,
+                  key: const Key('entry_error_text'),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// One entry's details and what I may do with it ([entryActions]). Pops

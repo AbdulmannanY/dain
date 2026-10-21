@@ -491,4 +491,126 @@ void main() {
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'share link: created from the screen, read and answered without sign-in',
+    () async {
+      // Setup through RLS as A: a new shop ledger for B's phone, linked to B.
+      final shopName = 'live link ${DateTime.now().toUtc()}';
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': shopName})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      await aView.load();
+      await bView.load();
+      expect(await aView.addEntry(iGave: true, amount: '12.5'), isTrue);
+      expect(await bView.addEntry(iGave: true, amount: '2'), isTrue);
+
+      // The other party cannot make a link; the owner can.
+      expect(await bView.createShareLink(), isNull);
+      final url = await aView.createShareLink();
+      expect(url, startsWith(DainConfig.shareBaseUrl));
+      final token = url!.substring(url.indexOf('#') + 1);
+      expect(token, matches(RegExp(r'^[A-Za-z0-9_-]{32}$')));
+
+      // What share/ calls, as anon: the contract the page relies on.
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      Future<Map<String, dynamic>> read(String t) async =>
+          await anon.rpc<dynamic>('get_shared_ledger', params: {'p_token': t})
+              as Map<String, dynamic>;
+
+      final page = await read(token);
+      expect(page['owner_name'], shopName);
+      expect(page['counterparty_name'], 'تجربة ب');
+      expect(page['currency'], 'SAR');
+      expect(page['confirmed_balance_minor'], 0);
+      final entries = (page['entries'] as List).cast<Map<String, dynamic>>();
+      expect(
+        entries.map(
+          (e) => (
+            e['direction'],
+            e['amount_minor'],
+            e['status'],
+            e['can_respond'],
+          ),
+        ),
+        [('in', 200, 'pending', false), ('out', 1250, 'pending', true)],
+      );
+      expect(entries.first.keys.toSet(), {
+        'id',
+        'direction',
+        'amount_minor',
+        'note',
+        'occurred_on',
+        'status',
+        'can_respond',
+      });
+
+      // Disputed through the link, with its reason; the owner sees it.
+      final ownerEntry = entries.last['id'] as String;
+      final status = await anon.rpc<dynamic>(
+        'respond_by_token',
+        params: {
+          'p_token': token,
+          'p_entry_id': ownerEntry,
+          'p_decision': 'disputed',
+          'p_note': 'ليس 12.5',
+        },
+      );
+      expect(status, 'disputed');
+      await aView.load();
+      final seen = aView.entries.singleWhere((e) => e.id == ownerEntry);
+      expect(seen.status, EntryStatus.disputed);
+      expect(seen.responseNote, 'ليس 12.5');
+
+      // A new link replaces the old one; stopping it kills the new one.
+      final again = await aView.createShareLink();
+      final token2 = again!.substring(again.indexOf('#') + 1);
+      expect(token2, isNot(token));
+      Future<String?> code(String t) async {
+        try {
+          await read(t);
+          return null;
+        } on PostgrestException catch (e) {
+          return e.code;
+        }
+      }
+
+      expect(await code(token), 'P0002');
+      expect((await read(token2))['owner_name'], shopName);
+      expect(await aView.revokeShareLink(), isTrue);
+      expect(aView.shareUrl, isNull);
+      expect(await code(token2), 'P0002');
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
