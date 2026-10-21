@@ -18,6 +18,7 @@ import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/data/profile_repository.dart';
 import 'package:dain/ledgers/ledger_controller.dart';
 import 'package:dain/ledgers/open_ledger_controller.dart';
+import 'package:dain/ledgers/shops_controller.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -724,6 +725,49 @@ void main() {
         'disputed',
       );
       await aView.revokeShareLink();
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'my shops: rename, delete an empty one; one with a ledger stays',
+    () async {
+      final aRepo = SupabaseLedgerRepository(a.client);
+      final stamp = DateTime.now().toUtc().toIso8601String();
+      final empty = await aRepo.createBusiness('live empty $stamp');
+      final busy = await aRepo.createBusiness('live busy $stamp');
+      await a.client.from('ledgers').insert({
+        'business_id': busy.id,
+        'counterparty_name': 'تجربة ب',
+        'counterparty_phone': '966500000002',
+      });
+
+      final shops = ShopsController(aRepo);
+      addTearDown(shops.dispose);
+      await shops.load();
+      expect(shops.error, isNull);
+      Business? named(String id) =>
+          shops.shops!.where((s) => s.id == id).firstOrNull;
+
+      expect(await shops.rename(empty.id, ' live renamed $stamp '), isTrue);
+      expect(named(empty.id)?.name, 'live renamed $stamp');
+
+      // The ledger keeps its shop: the foreign key refuses (23503).
+      expect(await shops.delete(busy.id), isFalse);
+      expect(shops.formError, startsWith('لا يُحذف محل فيه دفاتر.'));
+      expect(named(busy.id), isNotNull);
+
+      expect(await shops.delete(empty.id), isTrue);
+      expect(named(empty.id), isNull);
+
+      // B cannot rename A's shop, even once linked and able to see it.
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final bShops = ShopsController(SupabaseLedgerRepository(b.client));
+      addTearDown(bShops.dispose);
+      expect(await bShops.rename(busy.id, 'hacked'), isFalse);
+      await shops.load();
+      expect(named(busy.id)?.name, 'live busy $stamp');
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),

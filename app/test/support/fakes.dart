@@ -283,6 +283,25 @@ class FakeLedgers implements LedgerRepository {
   Future<void> revokeShareLink(String ledgerId) async =>
       shareLinks.remove(ledgerId);
 
+  /// Shops holding ledgers: deleting one is refused like the FK does.
+  final shopsWithLedgers = <String>{};
+
+  @override
+  Future<void> renameBusiness(String id, String name) async {
+    final i = businesses.indexWhere((b) => b.id == id);
+    if (i < 0) throw StateError('shop not found');
+    businesses = [...businesses]..[i] = Business(id: id, name: name);
+  }
+
+  @override
+  Future<void> deleteBusiness(String id) async {
+    if (shopsWithLedgers.contains(id) || opened.any((o) => o.$1 == id)) {
+      throw const PostgrestException(message: 'fk', code: '23503');
+    }
+    if (!businesses.any((b) => b.id == id)) throw StateError('shop not found');
+    businesses = businesses.where((b) => b.id != id).toList();
+  }
+
   @override
   Future<List<Business>> fetchMyBusinesses() async {
     final error = failWith;

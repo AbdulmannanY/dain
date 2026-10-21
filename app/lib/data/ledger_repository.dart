@@ -245,6 +245,13 @@ abstract interface class LedgerRepository {
 
   Future<Business> createBusiness(String name);
 
+  /// Renames a shop I own; [StateError] when it is not mine (RLS shows no row).
+  Future<void> renameBusiness(String id, String name);
+
+  /// Deletes a shop I own. One that still has ledgers is refused by the
+  /// database (`23503`): a ledger is never deleted.
+  Future<void> deleteBusiness(String id);
+
   /// Opens a ledger I own for [phone] (normalized), under [businessId] or
   /// personal when null. Returns the new ledger's id. A second ledger for the
   /// same phone under the same shop (or personally) fails with `23505`.
@@ -407,6 +414,27 @@ class SupabaseLedgerRepository implements LedgerRepository {
         .select('id, name')
         .single();
     return _business(row);
+  }
+
+  @override
+  Future<void> renameBusiness(String id, String name) async {
+    final rows = await _client
+        .from('businesses')
+        .update({'name': name})
+        .eq('id', id)
+        .select('id');
+    if (rows.isEmpty) throw StateError('shop not found');
+  }
+
+  @override
+  Future<void> deleteBusiness(String id) async {
+    final rows = await _client
+        .from('businesses')
+        .delete()
+        .eq('id', id)
+        .eq('owner_id', _myId)
+        .select('id');
+    if (rows.isEmpty) throw StateError('shop not found');
   }
 
   @override

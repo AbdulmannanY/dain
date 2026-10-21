@@ -7,6 +7,7 @@ import '../session/session_controller.dart';
 import 'common.dart';
 import 'ledger_screen.dart';
 import 'open_ledger_screen.dart';
+import 'shops_screen.dart';
 import 'screens.dart';
 
 /// The signed-in home: every ledger I own or am linked to, with the agreed
@@ -64,6 +65,16 @@ class _LedgersScreenState extends State<LedgersScreen> {
     if (mounted) await _ledgers.load();
   }
 
+  /// Shop names show on the ledgers, so the list reloads on the way back.
+  Future<void> _showShops() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => ShopsScreen(repository: widget.repository),
+      ),
+    );
+    if (mounted) await _ledgers.load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
@@ -77,6 +88,12 @@ class _LedgersScreenState extends State<LedgersScreen> {
       appBar: AppBar(
         title: const Text('دفاتري'),
         actions: [
+          IconButton(
+            key: const Key('shops_button'),
+            tooltip: 'محلاتي',
+            icon: const Icon(Icons.storefront_outlined),
+            onPressed: _showShops,
+          ),
           IconButton(
             key: const Key('sign_out_button'),
             tooltip: 'تسجيل الخروج',
