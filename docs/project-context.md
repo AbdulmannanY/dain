@@ -4,7 +4,7 @@
 > الفعلية (لا من الذاكرة). بروتوكول التسليم في
 > [`docs/agent-script-protocol.md`](agent-script-protocol.md).
 >
-> آخر تحديث: 2026-10-21، عند الـ commit `d8b166f`.
+> آخر تحديث: 2026-10-21، عند الـ commit `19f8b78`.
 
 ## 1. الفكرة
 
@@ -24,6 +24,7 @@
 | Publishable key | `sb_publishable_JTVwmwscU9kAwi3PM2EQMQ_shfAYx5X` (علني بالتصميم، RLS يحمي البيانات؛ موجود في `app/lib/core/config.dart`) |
 | معرّف التطبيق | `app.dain.dain`، الاسم الظاهر «دائن» |
 | Flutter | `3.44.0` (Dart 3.12)، مثبّت في `.fvmrc` ويقرأه CI |
+| صفحة المشاركة | `https://abdulmannany.github.io/dain/#<token>` (GitHub Pages من `share/`؛ `DainConfig.shareBaseUrl`) |
 
 ### الدخول بالجوال (إعداد Supabase)
 
@@ -46,7 +47,10 @@ Authentication ← Sign In / Providers ← **Phone**:
   المستودع: **Contents = Read and write** و**Workflows = Read and write**.
   بدون Workflows يرفض GitHub أي دفع يلمس `.github/workflows/`
   (`refusing to allow a Personal Access Token ... without workflow scope`).
-- لا يُبنى APK محلياً (NDK غير متاح على ARM داخل proot). المعاينة عبر:
+- GitHub Pages يُفعَّل مرة واحدة: Settings ← Pages ← Source: **GitHub Actions**.
+  بدونه يفشل workflow «Share page deploy».
+- لا يُبنى APK محلياً (NDK غير متاح على ARM داخل proot)؛ يُنزَّل من CI (§7).
+  المعاينة عبر:
 
   ```bash
   cd ~/dain/app && flutter run -d web-server --web-port 8081 --web-hostname 0.0.0.0
@@ -72,7 +76,12 @@ GitHub مسموح أصلاً (clone/fetch للمستودعات العامة). و
 ```
 .fvmrc                         Flutter 3.44.0
 .github/workflows/ci.yml       CI (انظر §7)
+.github/workflows/pages.yml    نشر share/ على GitHub Pages
 docs/                          هذا الملف + بروتوكول التسليم
+share/                         صفحة الرابط للطرف الآخر (HTML + JS، بلا تبعيات)
+  index.html                   الصفحة، و CSP يسمح بـ Supabase فقط
+  dain-share.js                المنطق والعرض (عُقد افتراضية ← DOM بـ textContent)
+  dain-share.test.mjs          `node --test`، بلا تبعيات
 supabase/
   migrations/20261020000000_dain_core.sql   المخطط كاملاً
   tests/supabase_stub.sql      بديل أدنى لأجزاء Supabase (auth.users, auth.uid, الأدوار)
@@ -206,9 +215,27 @@ app/                           تطبيق Flutter (android + web)
 - إن سبق الطرفُ الآخر (`55000`): «تغيّرت حالة هذا القيد. أُعيد تحميل الدفتر.»
   ويُعاد التحميل، فتعرض النافذة الحالة الجديدة.
 
-**غير مبني بعد:** رابط المشاركة وصفحة الويب، التذكير
-(`remind_every_days` بلا مُشغّل)، إدارة المحلات (تعديل الاسم والحذف)، بناء
-APK في CI.
+**رابط للطرف الآخر** (المالك فقط، زر الرابط في شريط شاشة الدفتر):
+
+- `create_share_link` (30 يوماً) يرجع الرمز مرة واحدة؛ يُبنى الرابط
+  `DainConfig.shareUrl(token)` = `shareBaseUrl#token` ويُنسخ (`Clipboard`، بلا
+  تبعية). الرمز بعد `#` فلا يصل إلى أي خادم أو سجل.
+- «رابط جديد» يُبطل السابق، و«إيقاف الرابط» (`revoke_share_link`) يُبطله.
+  الرمز لا يُقرأ ثانية (يُخزَّن SHA-256 فقط)، فيظهر في الجلسة التي أُنشئ فيها.
+
+**صفحة الرابط** (`share/`، لمن لا يملك التطبيق، بدور `anon`):
+
+- `fetch` إلى `/rest/v1/rpc/get_shared_ledger` و`respond_by_token` بترويسة
+  `apikey` فقط (المفتاح المنشور يكفي، وCORS يسمح بأي أصل).
+- تعرض الدفتر **من جهة الزائر**: الرصيد مقلوب، و`out` من المالك = «أخذت».
+  التأكيد والاعتراض على قيود المالك فقط (`can_respond`)، والاعتراض على
+  المعلّق فقط، و**سبب الاعتراض إجباري** كما في التطبيق.
+- الأسماء والملاحظات (يكتبها المالك) تُعرض بـ `textContent` فقط، وCSP يمنع أي
+  سكربت أو اتصال غير Supabase. `P0002` = رابط غير صالح أو منتهٍ، بلا إعادة
+  محاولة؛ و`55000` يعيد التحميل.
+
+**غير مبني بعد:** التذكير (`remind_every_days` بلا مُشغّل)، إدارة المحلات
+(تعديل الاسم والحذف)، توقيع APK بمفتاح ثابت.
 
 **التبعيات:** `supabase_flutter ^2.18.3` و`flutter_localizations` (SDK) فقط.
 لا Riverpod؛ الحالة عبر `ChangeNotifier` + `ListenableBuilder`. أي تبعية
@@ -218,8 +245,9 @@ APK في CI.
 
 | الأمر | ماذا يغطي |
 |---|---|
-| `cd app && flutter test` | 48 اختباراً: تطبيع الأرقام والمبالغ، تسلسل الدخول عبر `DainApp` كاملاً بمستودعات وهمية، الملخصات والمجاميع، الاتجاه والإشارة وإجراءات القيد لكل حالة، شاشة الدفاتر و«دفتر جديد» وشاشة الدفتر ونافذة القيد بعرض جوال 360 بكسل |
-| `cd app && flutter test test/live --dart-define=DAIN_LIVE=true` | على Supabase الحقيقي بالرقمين، عبر `SessionController` والمستودعات الحقيقية: (1) أ يفتح محلاً ودفتراً لرقم ب، ثم ب يدخل فيُربط له؛ (2) أ يسجّل 123.45 و3.45، ب يؤكد الأول، ثم يُتحقَّق من الرصيد من الجهتين (+12345/−12345، مفتوح 12000، معلّق 1)؛ (3) أ يفتح دفتراً في محل جديد عبر `OpenLedgerController`: رقمه مرفوض، والتكرار `23505`، ثم يُربط لـ ب، ومحل أ ليس من محلات ب؛ (4) عبر `LedgerController` من الجهتين: أ «أعطيت 100» يُخزَّن `out`، ب «أعطيت ٣٠» يُخزَّن `in`، ثم +7000/−7000؛ (5) اعتراض بلا سبب يُرفض محلياً، وبسبب يُخزَّن، والثاني `55000`، ثم سحب، واعتراض فتأكيد، وسحب المؤكد مرفوض، ثم +2000/−2000 |
+| `cd app && flutter test` | 50 اختباراً: تطبيع الأرقام والمبالغ، تسلسل الدخول عبر `DainApp` كاملاً بمستودعات وهمية، الملخصات والمجاميع، الاتجاه والإشارة وإجراءات القيد لكل حالة، شاشة الدفاتر و«دفتر جديد» وشاشة الدفتر ونافذة القيد ورابط المشاركة بعرض جوال 360 بكسل |
+| `cd app && flutter test test/live --dart-define=DAIN_LIVE=true` | على Supabase الحقيقي بالرقمين، عبر `SessionController` والمستودعات الحقيقية: (1) أ يفتح محلاً ودفتراً لرقم ب، ثم ب يدخل فيُربط له؛ (2) أ يسجّل 123.45 و3.45، ب يؤكد الأول، ثم يُتحقَّق من الرصيد من الجهتين (+12345/−12345، مفتوح 12000، معلّق 1)؛ (3) أ يفتح دفتراً في محل جديد عبر `OpenLedgerController`: رقمه مرفوض، والتكرار `23505`، ثم يُربط لـ ب، ومحل أ ليس من محلات ب؛ (4) عبر `LedgerController` من الجهتين: أ «أعطيت 100» يُخزَّن `out`، ب «أعطيت ٣٠» يُخزَّن `in`، ثم +7000/−7000؛ (5) اعتراض بلا سبب يُرفض محلياً، وبسبب يُخزَّن، والثاني `55000`، ثم سحب، واعتراض فتأكيد، وسحب المؤكد مرفوض، ثم +2000/−2000؛ (6) رابط من `LedgerController`: الطرف الآخر لا ينشئه، ثم بدور anon شكل `get_shared_ledger` الذي تعتمده `share/` (المفاتيح والاتجاه و`can_respond`)، واعتراض عبر الرابط يراه المالك، والرابط الجديد يُبطل القديم، والإيقاف يُبطل الجديد |
+| `node --test share/dain-share.test.mjs` | 12 اختباراً لمنطق الصفحة: الرمز، المبالغ، قلب الجهة، الأزرار لكل حالة، سبب الاعتراض، التحميل والتأكيد والاعتراض و`55000` و`P0002` بـ fetch وهمي، و`mount` نصوصاً لا markup |
 | `PGHOST=... PGPORT=... PGUSER=postgres bash supabase/tests/run_tests.sh` | المخطط و39 فحصاً (Postgres 15+) |
 
 - الاختبار الحي يُتخطّى ما لم يُمرَّر `DAIN_LIVE=true`. كل تشغيل يضيف محلات
@@ -232,13 +260,23 @@ APK في CI.
   الإشارة يُفشل الاختبارات، وكذلك حذف فحص رقمي، أو إعادة استخدام المحل، أو
   فلتر `owner_id`، أو الربط عند إعادة الفتح، أو قلب `entryDirection` أو
   إشارة `buildEntries`، أو الاعتراض على المعترض عليه، أو شرط السبب، أو قلب
-  قرار `respond_entry` (يكشفه الاختبار الحي وحده).
+  قرار `respond_entry` (يكشفه الاختبار الحي وحده)، أو نسخ الرابط، أو `#` في
+  الرابط، أو قلب الجهة أو الرصيد أو شرط السبب في الصفحة.
+- الصفحة جُرّبت أيضاً في jsdom على Supabase الحقيقي برابط حقيقي (عرض،
+  اعتراض بلا سبب ثم بسبب، ورمز خاطئ)؛ jsdom ليس تبعية للمشروع.
 - **CI** (`.github/workflows/ci.yml`) عند push إلى `main` وعند PR:
   - **Flutter app**: `pub get` ← `dart format --set-exit-if-changed` ←
     `flutter analyze --fatal-infos` ← `flutter test`.
+  - **Android APK** (بعد نجاح Flutter app، ليس في PR): `flutter build apk
+    --release` ويُرفع artifact باسم `dain-apk-<رقم التشغيل>` لمدة 14 يوماً.
+    موقّع بمفتاح debug الخاص بالمشغّل، وهو **يتغيّر كل تشغيل**: لتثبيت نسخة
+    أحدث احذف السابقة أولاً.
+  - **Share page**: `node --test share/dain-share.test.mjs` (Node 22).
   - **Database schema tests**: حاوية `postgres:17` ← `run_tests.sh`.
   - تشغيل يدوي: Run workflow مع `live=true` يضيف الاختبار الحي.
   - `actions/checkout@v5`.
+- **Share page deploy** (`.github/workflows/pages.yml`) عند push يلمس `share/`:
+  الاختبارات ثم نشر `index.html` و`dain-share.js` فقط.
 
 ## 8. السجل
 
@@ -253,6 +291,10 @@ APK في CI.
 | `1e10c65` | 2026-10-21 | هذا الملف بعد «دفتر جديد» (سكربت `dain-05-docs.sh`) | #5 ✅ 0:57 |
 | `3f3cb47` | 2026-10-21 | شاشة الدفتر وتسجيل «أعطيت/أخذت» (سكربت `dain-06-ledger-screen.sh`) | #6 ✅ 0:51 |
 | `d8b166f` | 2026-10-21 | تأكيد القيد والاعتراض بسبب والسحب (سكربت `dain-07-respond.sh`) | #7 ✅ 0:56 |
+| `7f8b3fa` | 2026-10-21 | هذا الملف بعد شاشة الدفتر (سكربت `dain-08-docs.sh`) | #8 ✅ 1:07 |
+| `f9d54cd` | 2026-10-21 | رابط للطرف الآخر من شاشة الدفتر (سكربت `dain-09-share-link.sh`) | دُفعت 09..12 معاً |
+| `85b679e` | 2026-10-21 | صفحة الرابط `share/` ونشرها على Pages (سكربت `dain-10-web-page.sh`) | — |
+| `19f8b78` | 2026-10-21 | APK في CI (سكربت `dain-11-apk-ci.sh`) | — |
 
 دروس الجلسة:
 
@@ -269,11 +311,15 @@ APK في CI.
 - في اختبارات الواجهة: `tester.pageBack()` يبحث عن تلميح `Back` الإنجليزي،
   والتطبيق عربي، فيُستخدم `find.byType(BackButton)`. و`find.descendant` لا
   يطابق الجذر نفسه إلا مع `matchRoot: true`.
+- PostgREST يرجع `P0002` بحالة HTTP 500؛ الصفحة تقرأ `code` من JSON لا الحالة.
+- لا CI ولا Pages يُجرَّبان من الجلسة (APK يحتاج Android SDK، وgithub.io غير
+  مسموح)؛ يُتحقَّق منهما في صفحة Actions بعد الدفع.
 
 ## 9. الخطوة التالية المقترحة
 
-1. **رابط المشاركة وصفحة التأكيد على الويب** (`create_share_link`،
-   `get_shared_ledger`، `respond_by_token`)، مع سبب إجباري للاعتراض كما في
-   التطبيق.
-2. مزوّد SMS حقيقي قبل أي مستخدم فعلي.
-3. بناء APK في CI.
+1. **سبب الاعتراض في القاعدة**: `respond_by_token` و`respond_entry` تقبلان
+   الاعتراض بلا سبب لمن يستدعيهما مباشرة. migration تُطبَّق يدوياً من لوحة
+   Supabase، مع فحص في `ledger_flow_test.sql`.
+2. توقيع APK بمفتاح ثابت (keystore في GitHub Secrets) ليُحدَّث التطبيق دون حذفه.
+3. مزوّد SMS حقيقي قبل أي مستخدم فعلي (حساب Twilio ولوحة Supabase، لا سكربت).
+4. التذكير (`remind_every_days`): يحتاج قرار مُشغّل مجدول.
