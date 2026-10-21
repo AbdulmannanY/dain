@@ -4,7 +4,7 @@
 > الفعلية (لا من الذاكرة). بروتوكول التسليم في
 > [`docs/agent-script-protocol.md`](agent-script-protocol.md).
 >
-> آخر تحديث: 2026-10-21، عند الـ commit `871134e`.
+> آخر تحديث: 2026-10-21، عند الـ commit `a1e6be1`.
 
 ## 1. الفكرة
 
@@ -25,6 +25,7 @@
 | معرّف التطبيق | `app.dain.dain`، الاسم الظاهر «دائن» |
 | Flutter | `3.44.0` (Dart 3.12)، مثبّت في `.fvmrc` ويقرأه CI |
 | صفحة المشاركة | `https://abdulmannany.github.io/dain/#<token>` (GitHub Pages من `share/`؛ `DainConfig.shareBaseUrl`) |
+| مفتاح توقيع APK | `CN=Dain, O=Dain, C=SA`، alias `upload`، SHA-256 `12:5F:5F:48:45:DC:21:64:04:C8:3D:EA:E4:29:A2:FB:E9:12:2D:B5:98:0A:9B:64:BE:E8:28:26:CD:27:C8:71` |
 
 ### الدخول بالجوال (إعداد Supabase)
 
@@ -50,6 +51,14 @@ Authentication ← Sign In / Providers ← **Phone**:
 - GitHub Pages يُفعَّل مرة واحدة: Settings ← Pages ← Source: **GitHub Actions**.
   بدونه يفشل workflow «Share page deploy» (هذا ما حدث في تشغيله الأول).
 - لا يُبنى APK محلياً (NDK غير متاح على ARM داخل proot)؛ يُنزَّل من CI (§7).
+- **مفتاح التوقيع** على الجوال فقط: `~/.dain-keys/upload.jks` وكلمة سره في
+  `~/.dain-keys/password.txt` (صلاحية 600)، ونسخة احتياطية خارج الجوال. ولّده
+  `dain-16-keystore.sh` مرة واحدة ويرفض استبداله. **لا يُستبدل أبداً**: تطبيق
+  موقّع بمفتاح آخر لا يُحدّث النسخة المثبّتة. في GitHub أربعة أسرار:
+  `DAIN_KEYSTORE_BASE64` و`DAIN_KEYSTORE_PASSWORD` و`DAIN_KEY_ALIAS` و
+  `DAIN_KEY_PASSWORD` (`/settings/secrets/actions`).
+- إعدادات المستودع على الجوال تحت **More ▾ ← Settings**؛ و`github.com/settings/...`
+  إعدادات الحساب لا المستودع.
   المعاينة عبر:
 
   ```bash
@@ -244,7 +253,7 @@ Run، **قبل** تشغيل السكربت الذي يضيفه (اختباره �
   محاولة؛ و`55000` يعيد التحميل.
 
 **غير مبني بعد:** التذكير (`remind_every_days` بلا مُشغّل)، إدارة المحلات
-(تعديل الاسم والحذف)، توقيع APK بمفتاح ثابت.
+(تعديل الاسم والحذف).
 
 **التبعيات:** `supabase_flutter ^2.18.3` و`flutter_localizations` (SDK) فقط.
 لا Riverpod؛ الحالة عبر `ChangeNotifier` + `ListenableBuilder`. أي تبعية
@@ -278,8 +287,13 @@ Run، **قبل** تشغيل السكربت الذي يضيفه (اختباره �
     `flutter analyze --fatal-infos` ← `flutter test`.
   - **Android APK** (بعد نجاح Flutter app، ليس في PR): `flutter build apk
     --release` ويُرفع artifact باسم `dain-apk-<رقم التشغيل>` لمدة 14 يوماً.
-    موقّع بمفتاح debug الخاص بالمشغّل، وهو **يتغيّر كل تشغيل**: لتثبيت نسخة
-    أحدث احذف السابقة أولاً.
+    موقّع **بمفتاح الرفع الثابت** من الأسرار: الخطوة «Upload key from secrets»
+    تقصّ المسافات والأسطر الملصوقة، وتفشل إن نقص سرّ أو إن لم يفتح `keytool`
+    المفتاح بكلمة السر (في ثوانٍ لا بعد البناء). بعد البناء يجب أن يُظهر
+    `apksigner` `CN=Dain`، فلا يُرفع APK موقّع بمفتاح debug أبداً. النسخ
+    الجديدة تُثبَّت فوق السابقة (النسخ حتى `dain-apk-10` موقّعة بمفتاح debug:
+    احذفها مرة واحدة). `build.gradle.kts` يقرأ `android/key.properties` إن وُجد،
+    وإلا يستخدم مفتاح debug للبناء المحلي فقط.
   - **Share page**: `node --test share/dain-share.test.mjs` (Node 22).
   - **Database schema tests**: حاوية `postgres:17` ← `run_tests.sh`.
   - تشغيل يدوي: Run workflow مع `live=true` يضيف الاختبار الحي.
@@ -310,6 +324,9 @@ Run، **قبل** تشغيل السكربت الذي يضيفه (اختباره �
 | `28259ff` | 2026-10-21 | هذا الملف بعد الرابط والصفحة وAPK (سكربت `dain-12-docs.sh`) | #9 ✅ 5:29، و`dain-apk-9`؛ Pages #1 ❌ (لم يكن مفعّلاً) |
 | `84bb363` | 2026-10-21 | الاعتراض يحتاج سبباً في القاعدة (سكربت `dain-13-dispute-reason.sh`) | دُفعت 13..15 معاً |
 | `871134e` | 2026-10-21 | إجراءات Node 24 و`ubuntu-24.04` (سكربت `dain-14-actions.sh`) | — |
+| `05a0220` | 2026-10-21 | هذا الملف بعد سبب الاعتراض (سكربت `dain-15-docs.sh`) | #10 ✅ 5:18؛ Pages #2 ❌ ثم #3 ✅ يدوياً بعد تفعيل Pages |
+| `26744ca` | 2026-10-21 | توقيع APK من الأسرار (سكربت `dain-17-apk-signing.sh`، بعد `dain-16-keystore.sh` على الجوال) | #11 ❌ `keystore password was incorrect` (قيمة السر الملصوقة) |
+| `a1e6be1` | 2026-10-21 | فحص المفتاح قبل البناء وقصّ الأسرار (سكربت `dain-18-key-check.sh`) | #12 ✅ 6:09، و`dain-apk-12` موقّع بمفتاح الرفع |
 
 دروس الجلسة:
 
@@ -328,10 +345,15 @@ Run، **قبل** تشغيل السكربت الذي يضيفه (اختباره �
   يطابق الجذر نفسه إلا مع `matchRoot: true`.
 - PostgREST يرجع `P0002` بحالة HTTP 500؛ الصفحة تقرأ `code` من JSON لا الحالة.
 - لا CI ولا Pages يُجرَّبان من الجلسة (APK يحتاج Android SDK، وgithub.io غير
-  مسموح)؛ يُتحقَّق منهما في صفحة Actions بعد الدفع.
+  مسموح)؛ يُتحقَّق منهما في صفحة Actions بعد الدفع. سجلات الخطوات تحتاج
+  تسجيل الدخول، فتُطلب لقطة منها.
+- PKCS12 يرد `keystore password was incorrect` لكلمة سر خاطئة **ولملف تالف**
+  معاً (فحص MAC)؛ فحص `keytool -list` قبل البناء يفرّق بثوانٍ.
+- GitHub يخفي قيم الأسرار في السجلات أينما ظهرت: `upload` صار `***` حتى في
+  `actions/***-artifact` و`***-keystore.jks`.
 
 ## 9. الخطوة التالية المقترحة
 
-1. توقيع APK بمفتاح ثابت (keystore في GitHub Secrets) ليُحدَّث التطبيق دون حذفه.
-2. مزوّد SMS حقيقي قبل أي مستخدم فعلي (حساب Twilio ولوحة Supabase، لا سكربت).
-3. التذكير (`remind_every_days`): يحتاج قرار مُشغّل مجدول.
+1. مزوّد SMS حقيقي قبل أي مستخدم فعلي (حساب Twilio ولوحة Supabase، لا سكربت).
+2. التذكير (`remind_every_days`): يحتاج قرار مُشغّل مجدول.
+3. إدارة المحلات: تعديل الاسم والحذف.
