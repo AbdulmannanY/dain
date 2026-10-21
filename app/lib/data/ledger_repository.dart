@@ -110,9 +110,35 @@ List<BalanceTotal> totalsByCurrency(List<LedgerSummary> ledgers) {
   ];
 }
 
+/// A shop the signed-in person owns.
+class Business {
+  const Business({required this.id, required this.name});
+
+  final String id;
+  final String name;
+}
+
 abstract interface class LedgerRepository {
   /// Every ledger I own or am the linked counterparty of (RLS decides).
   Future<List<LedgerSummary>> fetchMine();
+
+  /// My verified phone as E.164 digits without '+', the form
+  /// `link_my_ledgers()` matches; null when unknown.
+  String? get myPhone;
+
+  /// Shops I own, by name.
+  Future<List<Business>> fetchMyBusinesses();
+
+  Future<Business> createBusiness(String name);
+
+  /// Opens a ledger I own for [phone] (normalized), under [businessId] or
+  /// personal when null. Returns the new ledger's id. A second ledger for the
+  /// same phone under the same shop (or personally) fails with `23505`.
+  Future<String> openLedger({
+    required String counterpartyName,
+    required String phone,
+    String? businessId,
+  });
 }
 
 class SupabaseLedgerRepository implements LedgerRepository {
@@ -120,12 +146,17 @@ class SupabaseLedgerRepository implements LedgerRepository {
 
   final SupabaseClient _client;
 
-  @override
-  Future<List<LedgerSummary>> fetchMine() async {
-    final myId = _client.auth.currentUser?.id;
-    if (myId == null) {
+  String get _myId {
+    final id = _client.auth.currentUser?.id;
+    if (id == null) {
       throw const AuthException('not signed in', code: 'not_signed_in');
     }
+    return id;
+  }
+
+  @override
+  Future<List<LedgerSummary>> fetchMine() async {
+    final myId = _myId;
     // ledgers has two FKs to profiles, so the owner embed names its FK.
     final ledgers = await _client
         .from('ledgers')
@@ -147,4 +178,53 @@ class SupabaseLedgerRepository implements LedgerRepository {
       myId: myId,
     );
   }
+
+  @override
+  String? get myPhone {
+    final phone = _client.auth.currentUser?.phone ?? '';
+    if (phone.isEmpty) return null;
+    return phone.startsWith('+') ? phone.substring(1) : phone;
+  }
+
+  @override
+  Future<List<Business>> fetchMyBusinesses() async {
+    // RLS also shows the shops of ledgers I am the counterparty of.
+    final rows = await _client
+        .from('businesses')
+        .select('id, name')
+        .eq('owner_id', _myId)
+        .order('name');
+    return [for (final r in rows) _business(r)];
+  }
+
+  @override
+  Future<Business> createBusiness(String name) async {
+    final row = await _client
+        .from('businesses')
+        .insert({'name': name})
+        .select('id, name')
+        .single();
+    return _business(row);
+  }
+
+  @override
+  Future<String> openLedger({
+    required String counterpartyName,
+    required String phone,
+    String? businessId,
+  }) async {
+    final row = await _client
+        .from('ledgers')
+        .insert({
+          'counterparty_name': counterpartyName,
+          'counterparty_phone': phone,
+          'business_id': ?businessId,
+        })
+        .select('id')
+        .single();
+    return row['id'] as String;
+  }
+
+  static Business _business(Map<String, dynamic> row) =>
+      Business(id: row['id'] as String, name: row['name'] as String);
 }

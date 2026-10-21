@@ -81,7 +81,9 @@ class FakeProfiles implements ProfileRepository {
   }
 }
 
-/// Returns [ledgers] (or throws [failWith]) on each fetch.
+/// Returns [ledgers] (or throws [failWith]) on each fetch. Opening a ledger
+/// behaves like the database: one per (shop or personal, phone), `23505`
+/// otherwise, and the new ledger shows up in the next fetch.
 class FakeLedgers implements LedgerRepository {
   FakeLedgers([this.ledgers = const []]);
 
@@ -90,10 +92,70 @@ class FakeLedgers implements LedgerRepository {
   int fetches = 0;
 
   @override
+  String? myPhone;
+  List<Business> businesses = [];
+
+  /// Thrown once by the next [openLedger], after any shop was created.
+  Object? failNextOpenWith;
+
+  /// (business id or '', phone) of every ledger opened.
+  final opened = <(String, String)>[];
+
+  @override
   Future<List<LedgerSummary>> fetchMine() async {
     fetches++;
     final error = failWith;
     if (error != null) throw error;
     return ledgers;
+  }
+
+  @override
+  Future<List<Business>> fetchMyBusinesses() async {
+    final error = failWith;
+    if (error != null) throw error;
+    return [...businesses]..sort((a, b) => a.name.compareTo(b.name));
+  }
+
+  @override
+  Future<Business> createBusiness(String name) async {
+    final shop = Business(id: 'shop-${businesses.length + 1}', name: name);
+    businesses = [...businesses, shop];
+    return shop;
+  }
+
+  @override
+  Future<String> openLedger({
+    required String counterpartyName,
+    required String phone,
+    String? businessId,
+  }) async {
+    final error = failNextOpenWith;
+    if (error != null) {
+      failNextOpenWith = null;
+      throw error;
+    }
+    final key = (businessId ?? '', phone);
+    if (opened.contains(key)) {
+      throw const PostgrestException(message: 'duplicate', code: '23505');
+    }
+    opened.add(key);
+    final id = 'new-${opened.length}';
+    final shop = businesses.where((b) => b.id == businessId).firstOrNull;
+    ledgers = [
+      ...ledgers,
+      LedgerSummary(
+        id: id,
+        iAmOwner: true,
+        title: counterpartyName,
+        subtitle: shop?.name,
+        currency: 'SAR',
+        myConfirmedMinor: 0,
+        myOpenMinor: 0,
+        pendingCount: 0,
+        disputedCount: 0,
+        otherPartyJoined: false,
+      ),
+    ];
+    return id;
   }
 }

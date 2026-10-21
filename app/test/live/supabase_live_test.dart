@@ -16,6 +16,7 @@ import 'package:dain/core/config.dart';
 import 'package:dain/data/auth_repository.dart';
 import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/data/profile_repository.dart';
+import 'package:dain/ledgers/open_ledger_controller.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -218,6 +219,74 @@ void main() {
       expect(asCounterparty.myConfirmedMinor, -12345);
       expect(asCounterparty.myOpenMinor, -12000);
       expect(asCounterparty.pendingCount, 1);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'A opens a ledger in a new shop from the form; B is linked to it',
+    () async {
+      final aLedgers = SupabaseLedgerRepository(a.client);
+      expect(aLedgers.myPhone, '966500000001');
+
+      final form = OpenLedgerController(aLedgers);
+      addTearDown(form.dispose);
+      await form.load();
+      expect(form.error, isNull, reason: 'load my shops');
+
+      // My own number is refused before anything is written.
+      final shopsBefore = form.businesses!.length;
+      form.select(const NewShopOwner());
+      expect(
+        await form.submit(
+          name: 'أنا',
+          phone: '+966 50 000 0001',
+          newShopName: 'unused',
+        ),
+        isNull,
+      );
+      expect(form.error, 'هذا رقمك أنت. أدخل رقم الطرف الآخر.');
+      expect(await aLedgers.fetchMyBusinesses(), hasLength(shopsBefore));
+
+      // A new shop and a ledger in it for B's phone, as the screen does it.
+      final shopName = 'live open ${DateTime.now().toUtc().toIso8601String()}';
+      final ledgerId = await form.submit(
+        name: 'تجربة ب',
+        phone: '٠٥٠٠٠٠٠٠٠٢',
+        newShopName: shopName,
+      );
+      expect(form.error, isNull, reason: 'open ledger');
+      expect(ledgerId, isNotNull);
+      final shop = (await aLedgers.fetchMyBusinesses()).singleWhere(
+        (s) => s.name == shopName,
+      );
+      expect((form.owner as ShopOwner).businessId, shop.id);
+
+      // The unique key (owner, shop, phone) refuses a second one.
+      expect(await form.submit(name: 'تجربة ب', phone: '0500000002'), isNull);
+      expect(form.error, 'لهذا الرقم دفتر في هذا المحل بالفعل.');
+
+      final asOwner = (await aLedgers.fetchMine()).singleWhere(
+        (l) => l.id == ledgerId,
+      );
+      expect(asOwner.title, 'تجربة ب');
+      expect(asOwner.subtitle, shopName);
+      expect(asOwner.otherPartyJoined, isFalse);
+
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final bLedgers = SupabaseLedgerRepository(b.client);
+      final asCounterparty = (await bLedgers.fetchMine()).singleWhere(
+        (l) => l.id == ledgerId,
+      );
+      expect(asCounterparty.iAmOwner, isFalse);
+      expect(asCounterparty.title, shopName);
+
+      // RLS now shows A's shop to B, but it is not one of B's shops.
+      expect(
+        (await bLedgers.fetchMyBusinesses()).map((s) => s.id),
+        isNot(contains(shop.id)),
+      );
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),

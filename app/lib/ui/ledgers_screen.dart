@@ -4,6 +4,7 @@ import '../core/money.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/ledgers_controller.dart';
 import '../session/session_controller.dart';
+import 'open_ledger_screen.dart';
 import 'screens.dart';
 
 /// The signed-in home: every ledger I own or am linked to, with the agreed
@@ -37,10 +38,29 @@ class _LedgersScreenState extends State<LedgersScreen> {
     super.dispose();
   }
 
+  Future<void> _openLedger() async {
+    final id = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => OpenLedgerScreen(repository: widget.repository),
+      ),
+    );
+    if (id == null || !mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('فُتح الدفتر.')));
+    await _ledgers.load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final session = widget.session;
     return Scaffold(
+      floatingActionButton: FloatingActionButton.extended(
+        key: const Key('new_ledger_button'),
+        onPressed: _openLedger,
+        icon: const Icon(Icons.add),
+        label: const Text('دفتر جديد'),
+      ),
       appBar: AppBar(
         title: const Text('دفاتري'),
         actions: [
@@ -66,7 +86,8 @@ class _LedgersScreenState extends State<LedgersScreen> {
             child: ListView(
               key: const Key('ledgers_list'),
               physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.only(bottom: 24),
+              // room for the floating button over the last tile
+              padding: const EdgeInsets.only(bottom: 88),
               children: [
                 _Header(
                   name: session.profile?.fullName ?? '',
