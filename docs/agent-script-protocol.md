@@ -1,7 +1,9 @@
 # بروتوكول التسليم — دائن
 
 > كيف تُسلَّم التعديلات لهذا المستودع. السياق في
-> [`docs/project-context.md`](project-context.md).
+> [`docs/project-context.md`](project-context.md)، والبداية في
+> [`docs/START-HERE.md`](START-HERE.md)، وأدوات توليد السكربتات في
+> [`tools/patchgen/`](../tools/patchgen/README.md).
 
 ## لماذا هذا الشكل
 
