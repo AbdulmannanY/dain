@@ -116,11 +116,17 @@ export async function rpc(name, params, fetchImpl) {
   return body;
 }
 
+/** 22/10/2026, as the app shows a day. */
+export function shortDay(date) {
+  return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
+}
+
 /**
  * The page's state and actions; [draw] is called after every change.
- * state.phase: 'loading' | 'error' | 'ready'.
+ * state.phase: 'loading' | 'error' | 'ready'. [print] opens the browser's
+ * print dialog (a printer, or "Save as PDF"); [now] dates the statement.
  */
-export function createApp({ token, fetchImpl, draw = () => {} }) {
+export function createApp({ token, fetchImpl, draw = () => {}, print = () => {}, now = () => new Date() }) {
   const state = {
     phase: 'loading',
     error: null,
@@ -131,6 +137,7 @@ export function createApp({ token, fetchImpl, draw = () => {} }) {
     disputing: null,
     draft: '',
     formError: null,
+    asOf: null,
   };
   const call = (name, params) => rpc(name, { p_token: token, ...params }, fetchImpl);
 
@@ -143,6 +150,7 @@ export function createApp({ token, fetchImpl, draw = () => {} }) {
     draw(state);
     try {
       state.view = viewOf(await call('get_shared_ledger', {}));
+      state.asOf = shortDay(now());
       state.phase = 'ready';
       state.error = null;
     } catch (err) {
@@ -182,6 +190,7 @@ export function createApp({ token, fetchImpl, draw = () => {} }) {
   return {
     state,
     load,
+    print,
     confirm: (id) => respond(id, 'confirmed'),
     startDispute(id) {
       state.disputing = id;
@@ -260,7 +269,9 @@ export function view(state, act) {
   };
   return page(
     h('h2', null, `دفترك مع ${v.title}`),
-    h('p', { class: 'muted' }, `أهلاً ${v.name}. هذه القيود سجّلها ${v.title}، وتستطيع تأكيدها أو الاعتراض عليها.`),
+    // On paper the page is a statement: who, and as of which day.
+    state.asOf && h('p', { class: 'print-only', 'data-key': 'statement' }, `كشف حساب ${v.name} حتى ${state.asOf}`),
+    h('p', { class: 'muted no-print' }, `أهلاً ${v.name}. هذه القيود سجّلها ${v.title}، وتستطيع تأكيدها أو الاعتراض عليها.`),
     h(
       'section',
       { class: 'balance', 'data-key': 'balance' },
@@ -268,12 +279,14 @@ export function view(state, act) {
       v.balance !== 0 && h('div', { class: 'amount' }, formatMoney(v.balance, v.currency)),
       h('div', { class: 'muted' }, 'الرصيد المتفق عليه (المؤكد فقط).'),
     ),
+    h('button', { class: 'secondary', 'data-key': 'print', onclick: () => act.print() }, 'طباعة الكشف أو حفظه PDF'),
     state.notice && h('p', { class: 'notice', 'data-key': 'notice' }, state.notice),
     state.error && h('p', { class: 'error', 'data-key': 'error' }, state.error),
     state.formError && !state.disputing && h('p', { class: 'error', 'data-key': 'form-error' }, state.formError),
     v.entries.length === 0
       ? h('p', { class: 'muted', 'data-key': 'empty' }, 'لا قيود بعد.')
       : h('ul', { class: 'entries' }, v.entries.map(entry)),
+    h('p', { class: 'muted no-print' }, h('a', { href: 'privacy.html', 'data-key': 'privacy' }, 'سياسة الخصوصية')),
   );
 }
 
@@ -304,7 +317,12 @@ export function start(root, win) {
     if (state.disputing) doc.getElementById('reason')?.focus();
   };
   const boot = () => {
-    app = createApp({ token: tokenFromHash(win.location.hash), fetchImpl: win.fetch.bind(win), draw });
+    app = createApp({
+      token: tokenFromHash(win.location.hash),
+      fetchImpl: win.fetch.bind(win),
+      draw,
+      print: () => win.print(),
+    });
     return app.load();
   };
   win.addEventListener('hashchange', boot);

@@ -54,6 +54,18 @@
     @media (prefers-color-scheme: dark) { button { color: #00382A; } }
     button.secondary { background: transparent; color: var(--green); border: 1px solid var(--green); }
     button:disabled { opacity: .5; cursor: default; }
+    a { color: var(--green); }
+    .print-only { display: none; }
+    /* Printed or saved as PDF: a statement on white paper, without buttons. */
+    @media print {
+      :root {
+        --green: #0E6B4F; --red: #B3261E; --bg: #FFFFFF; --card: #FFFFFF;
+        --text: #000000; --muted: #444444; --line: #BBBBBB;
+      }
+      button, .actions, .dispute, .notice, .no-print { display: none !important; }
+      .print-only { display: block; font-weight: 600; }
+      .balance, .entries li { break-inside: avoid; }
+    }
   </style>
 </head>
 <body>

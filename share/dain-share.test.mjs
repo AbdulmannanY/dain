@@ -1,5 +1,6 @@
 // node --test share/dain-share.test.mjs  (no dependencies)
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 import {
@@ -247,6 +248,36 @@ test('if the owner acted first (55000), the page says so and reloads', async () 
   const page = view(app.state, app);
   assert.ok(texts(page).includes('تغيّرت حالة هذا القيد. أُعيد تحميل الدفتر.'));
   assert.equal(find(page, 'confirm-a'), null);
+});
+
+test('the statement: a dated line for paper, and a button that prints', async () => {
+  const { fetchImpl } = fakeFetch({
+    get_shared_ledger: () => [200, ledger([row('a', 'out', 1250, 'confirmed', true)], 1250)],
+  });
+  let printed = 0;
+  const app = createApp({
+    token: TOKEN,
+    fetchImpl,
+    print: () => printed++,
+    now: () => new Date(2026, 9, 22, 23, 59),
+  });
+  await app.load();
+  const page = view(app.state, app);
+  const line = find(page, 'statement');
+  assert.deepEqual(texts(line), ['كشف حساب سعد حتى 22/10/2026']);
+  assert.equal(line.props.class, 'print-only');
+  find(page, 'print').props.onclick();
+  assert.equal(printed, 1);
+  assert.equal(find(page, 'privacy').props.href, 'privacy.html');
+});
+
+test('the privacy page: no script, a strict CSP, and it goes online', () => {
+  const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const privacy = read('./privacy.html');
+  assert.ok(!/<script/i.test(privacy), 'no script');
+  assert.match(privacy, /content="default-src 'none';/);
+  assert.match(privacy, /حذف الحساب/);
+  assert.match(read('../.github/workflows/pages.yml'), /cp share\/index\.html share\/dain-share\.js share\/privacy\.html _site\//);
 });
 
 test('mount builds text nodes, never markup, and wires clicks', () => {

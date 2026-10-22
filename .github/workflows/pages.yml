@@ -42,7 +42,7 @@ jobs:
       - name: Only the page itself goes online
         run: |
           mkdir _site
-          cp share/index.html share/dain-share.js _site/
+          cp share/index.html share/dain-share.js share/privacy.html _site/
 
       - uses: actions/configure-pages@v6
 
