@@ -179,6 +179,32 @@ class FakeLedgers implements LedgerRepository {
     return events[entryId] ?? const [];
   }
 
+  /// What `ledger_flows` holds, already from my side; [failFlowsWith] is
+  /// thrown instead when set. Like the query, a confirmed payment before
+  /// the day asked for is left out.
+  List<LedgerFlow> flows = [];
+  Object? failFlowsWith;
+
+  /// The day each [fetchFlows] asked from, in order.
+  final flowsSince = <DateTime>[];
+
+  @override
+  Future<List<LedgerFlow>> fetchFlows(
+    List<LedgerSummary> ledgers, {
+    required DateTime since,
+  }) async {
+    flowsSince.add(since);
+    final error = failFlowsWith;
+    if (error != null) throw error;
+    final ids = {for (final l in ledgers) l.id};
+    return [
+      for (final f in flows)
+        if (ids.contains(f.ledgerId) &&
+            (f.paidOn == null || !f.paidOn!.isBefore(since)))
+          f,
+    ];
+  }
+
   /// The id sent with every entry added (null when none was sent), in order.
   final sentIds = <String?>[];
 

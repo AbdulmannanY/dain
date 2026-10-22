@@ -6,6 +6,7 @@ import '../ledgers/ledgers_controller.dart';
 import '../session/session_controller.dart';
 import 'account_screen.dart';
 import 'common.dart';
+import 'dashboard_screen.dart';
 import 'ledger_screen.dart';
 import 'open_ledger_screen.dart';
 import 'shops_screen.dart';
@@ -81,6 +82,16 @@ class _LedgersScreenState extends State<LedgersScreen> {
     if (mounted) await _ledgers.load();
   }
 
+  /// Ledgers opened from the dashboard may change, so the list reloads.
+  Future<void> _showDashboard() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => DashboardScreen(repository: widget.repository),
+      ),
+    );
+    if (mounted) await _ledgers.load();
+  }
+
   /// Shop names show on the ledgers, so the list reloads on the way back.
   Future<void> _showShops() async {
     await Navigator.of(context).push<void>(
@@ -104,6 +115,12 @@ class _LedgersScreenState extends State<LedgersScreen> {
       appBar: AppBar(
         title: const Text('دفاتري'),
         actions: [
+          IconButton(
+            key: const Key('dashboard_button'),
+            tooltip: 'الملخص المالي',
+            icon: const Icon(Icons.insights_outlined),
+            onPressed: _showDashboard,
+          ),
           IconButton(
             key: const Key('account_button'),
             tooltip: 'حسابي',

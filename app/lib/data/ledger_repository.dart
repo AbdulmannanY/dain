@@ -266,6 +266,58 @@ List<BalanceTotal> totalsByCurrency(List<LedgerSummary> ledgers) {
 
 enum EntryStatus { pending, confirmed, disputed, voided }
 
+/// One row of `ledger_flows`: the confirmed payments of one day in a ledger,
+/// or what is still pending or disputed there, in one direction. Amounts
+/// are turned to my side, like [LedgerEntry.myDeltaMinor]: positive = I
+/// gave (or, for a payment, I paid), negative = I took (was paid).
+class LedgerFlow {
+  const LedgerFlow({
+    required this.ledgerId,
+    required this.status,
+    required this.myDeltaMinor,
+    required this.count,
+    this.paidOn,
+  });
+
+  final String ledgerId;
+
+  /// [EntryStatus.confirmed] rows are payments only; pending and disputed
+  /// rows hold debts and payments alike.
+  final EntryStatus status;
+  final int myDeltaMinor;
+  final int count;
+
+  /// The day of a confirmed payment as recorded (`occurred_on`); null for
+  /// pending and disputed rows.
+  final DateTime? paidOn;
+}
+
+/// Turns `ledger_flows` rows to my side, with [ledgers] telling whether I
+/// own each ledger. Rows of a ledger missing from [ledgers] (opened between
+/// the two reads) are left out.
+List<LedgerFlow> buildFlows(
+  List<Map<String, dynamic>> rows, {
+  required List<LedgerSummary> ledgers,
+}) {
+  final owner = {for (final l in ledgers) l.id: l.iAmOwner};
+  return [
+    for (final r in rows)
+      if (owner[r['ledger_id']] case final iAmOwner?)
+        LedgerFlow(
+          ledgerId: r['ledger_id'] as String,
+          status: EntryStatus.values.byName(r['status'] as String),
+          myDeltaMinor:
+              (iAmOwner ? 1 : -1) *
+              (r['direction'] == 'out' ? 1 : -1) *
+              (r['amount_minor'] as num).toInt(),
+          count: (r['entry_count'] as num).toInt(),
+          paidOn: r['paid_on'] == null
+              ? null
+              : DateTime.parse(r['paid_on'] as String),
+        ),
+  ];
+}
+
 /// The stored direction is relative to the ledger OWNER ('out' = the owner
 /// gave). [iGave] is from the person recording, so the counterparty giving is
 /// 'in'.
@@ -393,6 +445,14 @@ abstract interface class LedgerRepository {
 
   /// An entry's trail, oldest first (`entry_events`, read by both sides).
   Future<List<EntryEvent>> fetchEntryEvents(String entryId);
+
+  /// What is pending or disputed in [ledgers], and their confirmed
+  /// payments from [since] on (`ledger_flows`, read through RLS), from my
+  /// side.
+  Future<List<LedgerFlow>> fetchFlows(
+    List<LedgerSummary> ledgers, {
+    required DateTime since,
+  });
 
   /// Records a pending entry; [iGave] is from my side. The other party
   /// confirms or disputes it. [id], made by the caller, makes a second send
@@ -553,6 +613,22 @@ class SupabaseLedgerRepository implements LedgerRepository {
         .eq('entry_id', entryId)
         .order('id', ascending: true);
     return buildEvents(rows, myId: _myId);
+  }
+
+  @override
+  Future<List<LedgerFlow>> fetchFlows(
+    List<LedgerSummary> ledgers, {
+    required DateTime since,
+  }) async {
+    // ledger_flows is a security_invoker view: same RLS as entries.
+    final rows = await _client
+        .from('ledger_flows')
+        .select(
+          'ledger_id, status, direction, paid_on, amount_minor, '
+          'entry_count',
+        )
+        .or('paid_on.is.null,paid_on.gte.${isoDay(since)}');
+    return buildFlows(rows, ledgers: ledgers);
   }
 
   @override

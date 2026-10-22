@@ -16,6 +16,7 @@ import 'package:dain/core/config.dart';
 import 'package:dain/data/auth_repository.dart';
 import 'package:dain/data/ledger_repository.dart';
 import 'package:dain/data/profile_repository.dart';
+import 'package:dain/ledgers/dashboard_controller.dart';
 import 'package:dain/ledgers/ledger_controller.dart';
 import 'package:dain/ledgers/open_ledger_controller.dart';
 import 'package:dain/ledgers/shops_controller.dart';
@@ -1340,6 +1341,114 @@ void main() {
       expect(rows, [
         {'amount_minor': 5000},
       ]);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'the dashboard from both sides: collected, paid, pending, disputed',
+    () async {
+      const applyFirst =
+          'apply supabase/migrations/20261029000000_ledger_flows.sql '
+          'in the SQL Editor first';
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live dashboard ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      // Dollars: earlier runs leave their own dollar ledgers, so what is
+      // checked is how much this ledger moves each side's totals.
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+            'currency': 'USD',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      final aDash = DashboardController(SupabaseLedgerRepository(a.client));
+      final bDash = DashboardController(SupabaseLedgerRepository(b.client));
+      addTearDown(aDash.dispose);
+      addTearDown(bDash.dispose);
+      Future<CurrencyDashboard> dollars(DashboardController d) async {
+        d.choose(DashboardPeriod.month);
+        await d.load();
+        expect(d.error, isNull, reason: applyFirst);
+        return d.dashboards!.singleWhere((x) => x.currency == 'USD');
+      }
+
+      CurrencyDashboard today(DashboardController d) {
+        d.choose(DashboardPeriod.day);
+        return d.dashboards!.singleWhere((x) => x.currency == 'USD');
+      }
+
+      final a0 = await dollars(aDash);
+      final a0Today = today(aDash);
+      final b0 = await dollars(bDash);
+
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      // B owes A 100, pays 30 (A confirms), then A records 7 still pending
+      // and 5 that B disputes.
+      await aView.load();
+      expect(await aView.addEntry(iGave: true, amount: '100'), isTrue);
+      await bView.load();
+      expect(await bView.confirmEntry(bView.entries.single.id), isTrue);
+      await bView.load();
+      expect(await bView.recordPayment(amount: '30'), isTrue);
+      await aView.load();
+      final payment = aView.entries.singleWhere((e) => e.isPayment);
+      expect(await aView.confirmEntry(payment.id), isTrue);
+      expect(await aView.addEntry(iGave: true, amount: '7'), isTrue);
+      expect(await aView.addEntry(iGave: true, amount: '5'), isTrue);
+      await bView.load();
+      final five = bView.entries.singleWhere(
+        (e) => e.myDeltaMinor == -500 && e.status == EntryStatus.pending,
+      );
+      expect(await bView.disputeEntry(five.id, 'not mine'), isTrue);
+
+      final a1 = await dollars(aDash);
+      final b1 = await dollars(bDash);
+      // A, owed: 70 left, 30 collected, 7 pending, 5 disputed.
+      expect(
+        (
+          a1.owedToMeMinor - a0.owedToMeMinor,
+          a1.collectedMinor - a0.collectedMinor,
+          a1.paidMinor - a0.paidMinor,
+          a1.pendingMinor - a0.pendingMinor,
+          a1.pendingCount - a0.pendingCount,
+          a1.disputedMinor - a0.disputedMinor,
+          a1.disputedCount - a0.disputedCount,
+        ),
+        (7000, 3000, 0, 700, 1, 500, 1),
+      );
+      // B, the same ledger from the other side: owes 70, paid 30.
+      expect(
+        (
+          b1.iOweMinor - b0.iOweMinor,
+          b1.paidMinor - b0.paidMinor,
+          b1.collectedMinor - b0.collectedMinor,
+          b1.pendingMinor - b0.pendingMinor,
+          b1.disputedMinor - b0.disputedMinor,
+        ),
+        (7000, 3000, 0, 700, 500),
+      );
+      // The payment was made today: it is in today's figures too.
+      expect(today(aDash).collectedMinor - a0Today.collectedMinor, 3000);
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
