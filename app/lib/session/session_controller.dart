@@ -113,6 +113,38 @@ class SessionController extends ChangeNotifier {
 
   Future<void> retry() => _afterSignIn();
 
+  /// Changes my name as others see it. Returns success.
+  Future<bool> rename(String input) async {
+    final name = input.trim();
+    if (name.isEmpty || name.runes.length > 80) {
+      _fail('اكتب اسمك (حتى 80 حرفاً).');
+      return false;
+    }
+    return _run(() async {
+      _profile = await _profiles.rename(name);
+    });
+  }
+
+  /// Deletes my account for good, then signs out locally. Returns success.
+  Future<bool> deleteAccount() async {
+    final ok = await _run(_profiles.deleteAccount);
+    if (!ok) return false;
+    // The user is gone on the server; drop the local session regardless.
+    try {
+      await _auth.signOut();
+    } catch (_) {}
+    _phone = null;
+    _profile = null;
+    _linkedCount = null;
+    _set(SessionStage.enterPhone);
+    return true;
+  }
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
+
   Future<void> signOut() async {
     await _run(_auth.signOut);
     _phone = null;

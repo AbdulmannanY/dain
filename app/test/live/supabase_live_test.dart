@@ -936,4 +936,106 @@ void main() {
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  // Keep this test last: it deletes B. The next run signs B up again (a new
+  // profile), and link_my_ledgers() reattaches every ledger for B's phone.
+  test(
+    'B renames, then deletes the account: A keeps the ledger and the balance',
+    () async {
+      expect(await b.controller.rename(' تجربة ب ٢ '), isTrue);
+      expect(b.controller.profile!.fullName, 'تجربة ب ٢');
+      final bProfiles = SupabaseProfileRepository(b.client);
+      expect((await bProfiles.fetchMine())!.fullName, 'تجربة ب ٢');
+
+      // Setup through RLS as A: a new shop ledger for B's phone, linked to B.
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live delete ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      // B gave A 7.00 (confirmed by A) and 3.00 (still pending).
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      addTearDown(bView.dispose);
+      addTearDown(aView.dispose);
+      await bView.load();
+      expect(await bView.addEntry(iGave: true, amount: '7'), isTrue);
+      expect(await bView.addEntry(iGave: true, amount: '3'), isTrue);
+      await aView.load();
+      final [three, seven] = aView.entries; // newest first
+      expect(await aView.confirmEntry(seven.id), isTrue);
+      expect(aView.ledger!.myConfirmedMinor, -700);
+      final url = await aView.createShareLink();
+
+      expect(
+        await b.controller.deleteAccount(),
+        isTrue,
+        reason:
+            '${b.controller.error}: apply supabase/migrations/'
+            '20261024000000_delete_account.sql in the SQL Editor first',
+      );
+      expect(b.controller.stage, SessionStage.enterPhone);
+      expect(b.client.auth.currentUser, isNull);
+
+      // A keeps the ledger, unlinked, with B's entries and the same balance.
+      await aView.load();
+      expect(aView.error, isNull);
+      expect(aView.ledger!.otherPartyJoined, isFalse);
+      expect(aView.ledger!.myConfirmedMinor, -700);
+      expect(aView.entries.map((e) => (e.id, e.createdByMe)), [
+        (three.id, false),
+        (seven.id, false),
+      ]);
+      final rows = await a.client
+          .from('entries')
+          .select('created_by')
+          .eq('ledger_id', ledgerId);
+      expect(rows.map((r) => r['created_by']), [null, null]);
+
+      // A link cannot answer an entry with no author; A still can.
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      String? code;
+      try {
+        await anon.rpc<dynamic>(
+          'respond_by_token',
+          params: {
+            'p_token': url!.substring(url.indexOf('#') + 1),
+            'p_entry_id': three.id,
+            'p_decision': 'confirmed',
+          },
+        );
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(code, 'P0002');
+      expect(await aView.confirmEntry(three.id), isTrue);
+      expect(aView.ledger!.myConfirmedMinor, -1000);
+      await aView.revokeShareLink();
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }

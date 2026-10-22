@@ -270,4 +270,52 @@ select t.err($$select public.send_sms_via_gateway('{}')$$, '42501', 'users canno
 select t.err($$select public.send_sms_via_gateway('{}')$$, '42501', 'anon cannot call the hook');
 reset role;
 
+-- ================= 10. deleting an account (20261024000000) =================
+insert into auth.users values ('eeeeeeee-0000-0000-0000-000000000005', '966500000005', now());
+\set as_E 'reset role; set request.jwt.claims to ''{"sub":"eeeeeeee-0000-0000-0000-000000000005"}''; set role authenticated;'
+:as_E
+insert into public.profiles (id, full_name) values (auth.uid(), 'Ezz');
+insert into public.ledgers (counterparty_name, counterparty_phone) values ('Ahmed', '966500000001');
+insert into t.ids select 'L_E', id from public.ledgers where owner_id = auth.uid();
+insert into public.entries (ledger_id, direction, amount_minor) select v, 'out', 100 from t.ids where k = 'L_E';
+:as_A
+insert into public.ledgers (counterparty_name, counterparty_phone) values ('Ezz', '966500000005');
+insert into t.ids select 'L_AE', id from public.ledgers where counterparty_phone = '966500000005';
+:as_E
+select public.link_my_ledgers();
+insert into public.entries (ledger_id, direction, amount_minor, note) select v, 'in', 700, 'X1' from t.ids where k = 'L_AE';
+insert into public.entries (ledger_id, direction, amount_minor, note) select v, 'in', 300, 'X2' from t.ids where k = 'L_AE';
+insert into t.ids select note, id from public.entries where note in ('X1', 'X2');
+:as_A
+select public.respond_entry((select v from t.ids where k = 'X1'), 'confirmed');
+insert into t.tokens select 'AE', public.create_share_link((select v from t.ids where k = 'L_AE'));
+:as_anon
+select t.err($$select public.delete_my_account()$$, '42501', 'anon cannot delete an account');
+:as_E
+select public.delete_my_account();
+reset role;
+select t.ok(not exists (select 1 from auth.users where id = 'eeeeeeee-0000-0000-0000-000000000005')
+            and not exists (select 1 from public.profiles where id = 'eeeeeeee-0000-0000-0000-000000000005'),
+            'the user and the profile are gone');
+select t.ok(not exists (select 1 from public.ledgers where id = (select v from t.ids where k = 'L_E'))
+            and not exists (select 1 from public.entries where ledger_id = (select v from t.ids where k = 'L_E')),
+            'the ledgers E owned and their entries are gone');
+select t.ok((select counterparty_id from public.ledgers where id = (select v from t.ids where k = 'L_AE')) is null,
+            'A''s ledger with E stays, unlinked');
+select t.ok((select count(*) from public.entries where ledger_id = (select v from t.ids where k = 'L_AE')
+              and created_by is null) = 2,
+            'the entries E recorded in it stay, with no author');
+select t.ok((select confirmed_balance_minor from public.ledger_balances
+              where ledger_id = (select v from t.ids where k = 'L_AE')) = -700,
+            'A''s agreed balance does not move');
+:as_anon
+select t.err($$select public.respond_by_token((select v from t.tokens where k = 'AE'), (select v from t.ids where k = 'X2'), 'confirmed')$$,
+             'P0002', 'a link cannot answer an entry with no author');
+:as_A
+select t.err($$select public.void_entry((select v from t.ids where k = 'X2'))$$,
+             'P0002', 'nobody can withdraw an entry with no author');
+select t.ok(public.respond_entry((select v from t.ids where k = 'X2'), 'confirmed') = 'confirmed',
+            'the owner can still confirm it');
+reset role;
+
 \echo ALL TESTS PASSED

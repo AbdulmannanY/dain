@@ -63,6 +63,32 @@ class FakeProfiles implements ProfileRepository {
     return Profile(id: _uid, fullName: names[_uid]!);
   }
 
+  /// Set by [deleteAccount]: the user ids deleted.
+  final deleted = <String>[];
+  Object? failNextWith;
+
+  @override
+  Future<Profile> rename(String fullName) async {
+    final error = failNextWith;
+    if (error != null) {
+      failNextWith = null;
+      throw error;
+    }
+    names[_uid] = fullName;
+    return Profile(id: _uid, fullName: fullName);
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    final error = failNextWith;
+    if (error != null) {
+      failNextWith = null;
+      throw error;
+    }
+    deleted.add(_uid);
+    names.remove(_uid);
+  }
+
   @override
   Future<int> linkMyLedgers() async {
     linkCalls++;

@@ -4,6 +4,7 @@ import '../core/money.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/ledgers_controller.dart';
 import '../session/session_controller.dart';
+import 'account_screen.dart';
 import 'common.dart';
 import 'ledger_screen.dart';
 import 'open_ledger_screen.dart';
@@ -88,6 +89,19 @@ class _LedgersScreenState extends State<LedgersScreen> {
       appBar: AppBar(
         title: const Text('دفاتري'),
         actions: [
+          IconButton(
+            key: const Key('account_button'),
+            tooltip: 'حسابي',
+            icon: const Icon(Icons.person_outline),
+            onPressed: () {
+              session.clearError();
+              Navigator.of(context).push<void>(
+                MaterialPageRoute(
+                  builder: (_) => AccountScreen(session: session),
+                ),
+              );
+            },
+          ),
           IconButton(
             key: const Key('shops_button'),
             tooltip: 'محلاتي',

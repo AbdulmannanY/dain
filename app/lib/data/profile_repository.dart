@@ -17,6 +17,12 @@ abstract interface class ProfileRepository {
   /// Calls `public.link_my_ledgers()`; returns how many ledgers it attached.
   /// The function requires an existing profile.
   Future<int> linkMyLedgers();
+
+  Future<Profile> rename(String fullName);
+
+  /// Calls `public.delete_my_account()`: my profile, shops and the ledgers I
+  /// own go; ledgers others own stay with them, unlinked from me.
+  Future<void> deleteAccount();
 }
 
 class SupabaseProfileRepository implements ProfileRepository {
@@ -63,6 +69,22 @@ class SupabaseProfileRepository implements ProfileRepository {
   Future<int> linkMyLedgers() async {
     final n = await _client.rpc<dynamic>('link_my_ledgers');
     return (n as num).toInt();
+  }
+
+  @override
+  Future<Profile> rename(String fullName) async {
+    final row = await _client
+        .from('profiles')
+        .update({'full_name': fullName})
+        .eq('id', _uid)
+        .select('id, full_name')
+        .single();
+    return _fromRow(row);
+  }
+
+  @override
+  Future<void> deleteAccount() async {
+    await _client.rpc<dynamic>('delete_my_account');
   }
 
   static Profile _fromRow(Map<String, dynamic> row) =>
