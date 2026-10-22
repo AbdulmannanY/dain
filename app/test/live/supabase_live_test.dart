@@ -20,6 +20,7 @@ import 'package:dain/ledgers/dashboard_controller.dart';
 import 'package:dain/ledgers/ledger_controller.dart';
 import 'package:dain/ledgers/open_ledger_controller.dart';
 import 'package:dain/ledgers/shops_controller.dart';
+import 'package:dain/ledgers/statement.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1471,6 +1472,96 @@ void main() {
       );
       // The payment was made today: it is in today's figures too.
       expect(today(aDash).collectedMinor - a0Today.collectedMinor, 3000);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'the statement from both sides: opening, agreed movements, closing',
+    () async {
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live statement ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+
+      // 100 given 40 days ago (before this month, whatever today is), then
+      // 30 paid today, both confirmed, and 7 today still pending.
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      await aView.load();
+      expect(
+        await aView.addEntry(
+          iGave: true,
+          amount: '100',
+          day: DateTime(today.year, today.month, today.day - 40),
+        ),
+        isTrue,
+      );
+      await bView.load();
+      expect(await bView.confirmEntry(bView.entries.single.id), isTrue);
+      await bView.load();
+      expect(await bView.recordPayment(amount: '30'), isTrue);
+      await aView.load();
+      final payment = aView.entries.singleWhere((e) => e.isPayment);
+      expect(await aView.confirmEntry(payment.id), isTrue);
+      expect(await aView.addEntry(iGave: true, amount: '7'), isTrue);
+      await aView.load();
+      await bView.load();
+
+      Statement statementOf(LedgerController v, StatementPeriod period) {
+        final range = statementRange(period, now);
+        return buildStatement(
+          v.ledger!,
+          v.entries,
+          from: range.from,
+          to: range.to,
+        );
+      }
+
+      for (final (view, sign) in [(aView, 1), (bView, -1)]) {
+        final month = statementOf(view, StatementPeriod.thisMonth);
+        expect(month.openingMinor, sign * 10000);
+        expect(
+          [for (final l in month.lines) (l.entry.myDeltaMinor, l.balanceMinor)],
+          [(sign * -3000, sign * 7000)],
+        );
+        expect(month.closingMinor, sign * 7000);
+        // the closing balance is the agreed balance the ledger shows
+        expect(month.closingMinor, view.ledger!.myConfirmedMinor);
+        expect(month.unconfirmedCount, 1);
+        final all = statementOf(view, StatementPeriod.all);
+        expect(
+          (all.openingMinor, all.lines.length, all.closingMinor),
+          (0, 2, sign * 7000),
+        );
+      }
+      expect(
+        statementText(statementOf(bView, StatementPeriod.thisMonth)),
+        contains('الرصيد النهائي: 70 ر.س عليك'),
+      );
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),

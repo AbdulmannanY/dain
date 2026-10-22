@@ -6,6 +6,7 @@ import '../core/open_url.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/ledger_controller.dart';
 import 'common.dart';
+import 'statement_screen.dart';
 
 /// One ledger: the agreed balance from my side, the entries newest first,
 /// "أعطيت" / "أخذت" to record a new one, and tapping an entry to confirm,
@@ -163,6 +164,20 @@ class _LedgerScreenState extends State<LedgerScreen> {
           appBar: AppBar(
             title: Text(ledger?.title ?? widget.title ?? ''),
             actions: [
+              if (ledger != null)
+                IconButton(
+                  key: const Key('statement_button'),
+                  tooltip: 'كشف الحساب',
+                  icon: const Icon(Icons.receipt_long_outlined),
+                  onPressed: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => StatementScreen(
+                        ledger: ledger,
+                        entries: _ledger.entries,
+                      ),
+                    ),
+                  ),
+                ),
               if (ledger != null && ledger.iAmOwner)
                 IconButton(
                   key: const Key('edit_counterparty_button'),
