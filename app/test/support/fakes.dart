@@ -168,6 +168,17 @@ class FakeLedgers implements LedgerRepository {
     return entries[ledger.id] ?? const [];
   }
 
+  /// entry id -> its trail; [failEventsWith] is thrown instead when set.
+  final events = <String, List<EntryEvent>>{};
+  Object? failEventsWith;
+
+  @override
+  Future<List<EntryEvent>> fetchEntryEvents(String entryId) async {
+    final error = failEventsWith;
+    if (error != null) throw error;
+    return events[entryId] ?? const [];
+  }
+
   /// The id sent with every entry added (null when none was sent), in order.
   final sentIds = <String?>[];
 

@@ -419,4 +419,55 @@ select t.err($$insert into public.entries (id, ledger_id, direction, amount_mino
 select t.ok((select count(*) from public.entries where note = 'ID1') = 1, 'and saved once');
 reset role;
 
+-- ================= 14. the audit trail (20261028000000) =================
+create function t.trail(p_note text) returns text language sql as $$
+  select string_agg(ev.event || ':' ||
+                    case when ev.actor is null then '-'
+                         when ev.actor = 'aaaaaaaa-0000-0000-0000-000000000001' then 'A'
+                         when ev.actor = 'bbbbbbbb-0000-0000-0000-000000000002' then 'B'
+                         else '?' end || ':' || coalesce(ev.via, '-') ||
+                    coalesce(':' || ev.note, ''), ' ' order by ev.id)
+    from public.entry_events ev join public.entries e on e.id = ev.entry_id
+   where e.note = p_note
+$$;
+grant execute on function t.trail(text) to anon, authenticated;
+:as_A
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 500, 'EV1' from t.ids where k = 'L_P';
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 500, 'EV2' from t.ids where k = 'L_P';
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 500, 'EV3' from t.ids where k = 'L_P';
+insert into t.tokens select 'P', public.create_share_link((select v from t.ids where k = 'L_P'));
+insert into t.ids select 'EV3', id from public.entries where note = 'EV3';
+:as_B
+select public.respond_entry((select id from public.entries where note = 'EV1'), 'confirmed');
+select public.respond_entry((select id from public.entries where note = 'EV2'), 'disputed', 'not mine');
+:as_A
+select public.void_entry((select id from public.entries where note = 'EV2'));
+:as_anon
+select public.respond_by_token((select v from t.tokens where k = 'P'),
+                               (select v from t.ids where k = 'EV3'), 'confirmed');
+:as_A
+select t.ok(t.trail('EV1') = 'created:A:app confirmed:B:app', 'created by A, confirmed by B in the app');
+select t.ok(t.trail('EV2') = 'created:A:app disputed:B:app:not mine voided:A:app',
+            'a dispute keeps its reason, then the withdrawal');
+select t.ok(t.trail('EV3') = 'created:A:app confirmed:-:link', 'an answer through the link has no account');
+select t.ok(t.trail('P1') = 'created:B:app confirmed:A:app', 'a payment has its trail too');
+:as_B
+select t.ok(t.trail('EV1') = 'created:A:app confirmed:B:app', 'the other side reads the same trail');
+:as_C
+select t.ok(not exists (select 1 from public.entry_events
+                         where ledger_id = (select v from t.ids where k = 'L_P')),
+            'someone outside the ledger reads none of it');
+:as_A
+select t.err($$insert into public.entry_events (entry_id, ledger_id, event)
+               select id, ledger_id, 'confirmed' from public.entries where note = 'EV1'$$,
+             '42501', 'no one writes the trail by hand');
+select t.err($$update public.entry_events set actor = null$$, '42501', 'or changes it');
+select t.err($$delete from public.entry_events$$, '42501', 'or deletes from it');
+:as_anon
+select t.err($$select count(*) from public.entry_events$$, '42501', 'anon cannot read it');
+reset role;
+
 \echo ALL TESTS PASSED

@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/money.dart';
@@ -96,6 +98,94 @@ String shareLinkMessage(LedgerSummary l, String url) =>
     'السلام عليكم ${l.title}،\n'
     'هذا دفترك معي في دائن. تستطيع تأكيد القيود أو الاعتراض عليها من الرابط:\n'
     '$url';
+
+/// A payment's status in words, as the receipt shows it.
+String _paymentStatus(EntryStatus s) => switch (s) {
+  EntryStatus.pending => 'بانتظار تأكيد الطرف الآخر',
+  EntryStatus.confirmed => 'مؤكد من الطرفين',
+  EntryStatus.disputed => 'معترض عليه',
+  EntryStatus.voided => 'مسحوب',
+};
+
+/// A short reference for an entry: the first 8 characters of its id.
+String entryRef(String id) => id.substring(0, min(8, id.length)).toUpperCase();
+
+/// The receipt of a payment [e] in [l], to read or to send: who paid whom,
+/// how much, which day, its reference and where it stands.
+String paymentReceipt(LedgerEntry e, LedgerSummary l) {
+  final iPaid = e.myDeltaMinor > 0;
+  final shop = l.subtitle == null ? '' : ' (${l.subtitle})';
+  return 'إيصال سداد من دائن\n'
+      'الرقم: ${entryRef(e.id)}\n'
+      'المبلغ: ${formatMoney(e.myDeltaMinor, l.currency)}\n'
+      'من: ${iPaid ? 'أنا' : '${l.title}$shop'}\n'
+      'إلى: ${iPaid ? '${l.title}$shop' : 'أنا'}\n'
+      'التاريخ: ${shortDay(e.occurredOn)}\n'
+      'الحالة: ${_paymentStatus(e.status)}';
+}
+
+enum EntryEventKind { created, confirmed, disputed, voided }
+
+/// One line of an entry's trail (`entry_events`), from my side.
+class EntryEvent {
+  const EntryEvent({
+    required this.kind,
+    required this.byMe,
+    required this.viaLink,
+    required this.actorKnown,
+    required this.note,
+    required this.at,
+  });
+
+  final EntryEventKind kind;
+  final bool byMe;
+
+  /// Answered from the share link, without an account.
+  final bool viaLink;
+
+  /// False when the person deleted their account, or for answers given
+  /// before the trail existed.
+  final bool actorKnown;
+  final String? note;
+  final DateTime at;
+}
+
+List<EntryEvent> buildEvents(
+  List<Map<String, dynamic>> rows, {
+  required String myId,
+}) => [
+  for (final r in rows)
+    EntryEvent(
+      kind: EntryEventKind.values.byName(r['event'] as String),
+      byMe: r['actor'] == myId,
+      viaLink: r['via'] == 'link',
+      actorKnown: r['actor'] != null,
+      note: r['note'] as String?,
+      at: DateTime.parse(r['at'] as String),
+    ),
+];
+
+/// "أُكّد · الطرف الآخر · 22/10/2026 14:05" (local time).
+String eventLine(EntryEvent e) {
+  final what = switch (e.kind) {
+    EntryEventKind.created => 'سُجّل',
+    EntryEventKind.confirmed => 'أُكّد',
+    EntryEventKind.disputed =>
+      e.note == null ? 'اعتُرض عليه' : 'اعتُرض عليه: ${e.note}',
+    EntryEventKind.voided => 'سُحب',
+  };
+  final who = e.viaLink
+      ? 'عبر الرابط'
+      : e.byMe
+      ? 'أنت'
+      : e.actorKnown
+      ? 'الطرف الآخر'
+      : 'غير معروف';
+  final t = e.at.toLocal();
+  final hm =
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+  return '$what · $who · ${shortDay(t)} $hm';
+}
 
 /// Turns PostgREST rows into summaries for [myId]. A ledger missing from
 /// [balanceRows] (created between the two reads) counts as all zeros.
@@ -301,6 +391,9 @@ abstract interface class LedgerRepository {
   /// Its entries from my side, newest first.
   Future<List<LedgerEntry>> fetchEntries(LedgerSummary ledger);
 
+  /// An entry's trail, oldest first (`entry_events`, read by both sides).
+  Future<List<EntryEvent>> fetchEntryEvents(String entryId);
+
   /// Records a pending entry; [iGave] is from my side. The other party
   /// confirms or disputes it. [id], made by the caller, makes a second send
   /// of the same entry fail with `23505` instead of saving it twice. A
@@ -450,6 +543,16 @@ class SupabaseLedgerRepository implements LedgerRepository {
         .order('occurred_on', ascending: false)
         .order('created_at', ascending: false);
     return buildEntries(rows, iAmOwner: ledger.iAmOwner, myId: _myId);
+  }
+
+  @override
+  Future<List<EntryEvent>> fetchEntryEvents(String entryId) async {
+    final rows = await _client
+        .from('entry_events')
+        .select('event, actor, via, note, at')
+        .eq('entry_id', entryId)
+        .order('id', ascending: true);
+    return buildEvents(rows, myId: _myId);
   }
 
   @override

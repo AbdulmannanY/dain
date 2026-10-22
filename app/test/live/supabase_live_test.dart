@@ -1227,6 +1227,33 @@ void main() {
       // 40 owed, the 1.00 sent twice above still pending.
       expect(bView.paymentRoom, 3900);
 
+      // Both sides read the same trail: B created it, A confirmed it.
+      final aTrail = await aView.eventsFor(paid.id);
+      expect(
+        aTrail.map((e) => (e.kind, e.byMe, e.viaLink)),
+        [
+          (EntryEventKind.created, false, false),
+          (EntryEventKind.confirmed, true, false),
+        ],
+        reason:
+            'apply supabase/migrations/20261028000000_entry_events.sql '
+            'in the SQL Editor first',
+      );
+      final bTrail = await bView.eventsFor(paid.id);
+      expect(bTrail.map((e) => e.byMe), [true, false]);
+      // Nobody writes it by hand.
+      code = null;
+      try {
+        await a.client.from('entry_events').insert({
+          'entry_id': paid.id,
+          'ledger_id': ledgerId,
+          'event': 'voided',
+        });
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(code, '42501');
+
       // The link shows which entries are payments.
       final url = await aView.createShareLink();
       final anon = SupabaseClient(

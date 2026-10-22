@@ -193,6 +193,10 @@ class LedgerController extends ChangeNotifier {
     return ok;
   }
 
+  /// An entry's trail, oldest first.
+  Future<List<EntryEvent>> eventsFor(String entryId) =>
+      _repository.fetchEntryEvents(entryId);
+
   Future<bool> confirmEntry(String entryId) =>
       _write(() => _repository.respondEntry(entryId, confirm: true));
 

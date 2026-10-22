@@ -792,6 +792,11 @@ class _EntryActionsSheet extends StatefulWidget {
 class _EntryActionsSheetState extends State<_EntryActionsSheet> {
   final _reason = TextEditingController();
 
+  /// Read once as the sheet opens; an action closes the sheet.
+  late final Future<List<EntryEvent>> _events = widget.controller.eventsFor(
+    widget.entry.id,
+  );
+
   /// The second step of a dispute (the reason) or a withdrawal (the warning).
   EntryAction? _step;
 
@@ -832,9 +837,8 @@ class _EntryActionsSheetState extends State<_EntryActionsSheet> {
             color: theme.colorScheme.onSurfaceVariant,
           );
           final busy = c.saving;
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+          return ListView(
+            shrinkWrap: true,
             children: [
               Text(
                 _entryTitle(e, widget.currency),
@@ -930,10 +934,101 @@ class _EntryActionsSheetState extends State<_EntryActionsSheet> {
                   style: TextStyle(color: theme.colorScheme.error),
                 ),
               ],
+              if (e.isPayment && c.ledger != null) ...[
+                const SizedBox(height: 16),
+                _Receipt(text: paymentReceipt(e, c.ledger!)),
+              ],
+              const SizedBox(height: 16),
+              Text('السجل', style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              _Trail(events: _events, style: muted),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// A payment's receipt and a button that copies it to send.
+class _Receipt extends StatefulWidget {
+  const _Receipt({required this.text});
+
+  final String text;
+
+  @override
+  State<_Receipt> createState() => _ReceiptState();
+}
+
+class _ReceiptState extends State<_Receipt> {
+  bool _copied = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      key: const Key('payment_receipt'),
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(widget.text),
+            const SizedBox(height: 4),
+            Align(
+              alignment: AlignmentDirectional.centerEnd,
+              child: TextButton.icon(
+                key: const Key('copy_receipt_button'),
+                onPressed: () async {
+                  await Clipboard.setData(ClipboardData(text: widget.text));
+                  if (mounted) setState(() => _copied = true);
+                },
+                icon: const Icon(Icons.copy_outlined),
+                label: Text(_copied ? 'نُسخ الإيصال' : 'نسخ الإيصال'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The entry's trail: who did what, how and when.
+class _Trail extends StatelessWidget {
+  const _Trail({required this.events, required this.style});
+
+  final Future<List<EntryEvent>> events;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<EntryEvent>>(
+      future: events,
+      builder: (context, snap) {
+        if (snap.hasError) {
+          return Text(
+            'تعذّر تحميل السجل.',
+            key: const Key('trail_error'),
+            style: style,
+          );
+        }
+        final list = snap.data;
+        if (list == null) {
+          return const Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+        return Column(
+          key: const Key('entry_trail'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [for (final ev in list) Text(eventLine(ev), style: style)],
+        );
+      },
     );
   }
 }
