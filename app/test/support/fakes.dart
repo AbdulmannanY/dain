@@ -168,8 +168,19 @@ class FakeLedgers implements LedgerRepository {
     return entries[ledger.id] ?? const [];
   }
 
+  /// The id sent with every entry added (null when none was sent), in order.
+  final sentIds = <String?>[];
+
+  /// Whether each entry added was a payment, in order.
+  final addedPayments = <bool>[];
+
+  /// The next add is saved, then its answer is lost (a network error), as
+  /// when the connection drops after the database committed.
+  bool loseNextAnswer = false;
+
   /// Like the database: a pending entry, counted in the open balance and the
-  /// pending count of the ledger's summary.
+  /// pending count of the ledger's summary. An id already saved is refused
+  /// with 23505, like the primary key.
   @override
   Future<void> addEntry(
     LedgerSummary ledger, {
@@ -177,12 +188,19 @@ class FakeLedgers implements LedgerRepository {
     required int amountMinor,
     String? note,
     required DateTime occurredOn,
+    String? id,
+    bool payment = false,
   }) async {
     final error = failNextAddWith;
     if (error != null) {
       failNextAddWith = null;
       throw error;
     }
+    if (id != null && sentIds.contains(id)) {
+      throw const PostgrestException(message: 'duplicate key', code: '23505');
+    }
+    sentIds.add(id);
+    addedPayments.add(payment);
     final direction = entryDirection(iAmOwner: ledger.iAmOwner, iGave: iGave);
     added.add((ledger.id, direction, amountMinor, note, occurredOn));
     final delta = iGave ? amountMinor : -amountMinor;
@@ -195,6 +213,7 @@ class FakeLedgers implements LedgerRepository {
         status: EntryStatus.pending,
         createdByMe: true,
         responseNote: null,
+        isPayment: payment,
       ),
       ...?entries[ledger.id],
     ];
@@ -215,6 +234,10 @@ class FakeLedgers implements LedgerRepository {
                 otherPartyJoined: l.otherPartyJoined,
               ),
     ];
+    if (loseNextAnswer) {
+      loseNextAnswer = false;
+      throw Exception('SocketException: connection reset');
+    }
   }
 
   @override
@@ -253,6 +276,7 @@ class FakeLedgers implements LedgerRepository {
           status: to,
           createdByMe: e.createdByMe,
           responseNote: to == EntryStatus.voided ? e.responseNote : note,
+          isPayment: e.isPayment,
         );
       int counted(EntryStatus s, {required bool open}) => switch (s) {
         EntryStatus.confirmed => e.myDeltaMinor,

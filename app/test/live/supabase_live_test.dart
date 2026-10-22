@@ -572,8 +572,11 @@ void main() {
         'note',
         'occurred_on',
         'status',
+        'kind',
         'can_respond',
       });
+      // Both are debts; payments have their own test below.
+      expect(entries.map((e) => e['kind']), ['debt', 'debt']);
 
       // Disputed through the link, with its reason; the owner sees it.
       final ownerEntry = entries.last['id'] as String;
@@ -1115,6 +1118,134 @@ void main() {
 
       expect(await aView.setDueDate(null), isTrue, reason: aView.formError);
       expect(aView.ledger!.dueOn, isNull);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
+    'payments: in part, never above what is owed, saved once, then agreed',
+    () async {
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live pay ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      await aView.load();
+      expect(await aView.addEntry(iGave: true, amount: '100'), isTrue);
+      await bView.load();
+      expect(await bView.confirmEntry(bView.entries.single.id), isTrue);
+      expect(bView.ledger!.myConfirmedMinor, -10000);
+      expect(bView.paymentRoom, 10000);
+
+      // Past the app's own check: the database refuses more than is owed.
+      String? code;
+      try {
+        await b.client.from('entries').insert({
+          'ledger_id': ledgerId,
+          'direction': 'in',
+          'amount_minor': 10001,
+          'kind': 'payment',
+        });
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(
+        code,
+        '23514',
+        reason:
+            'apply supabase/migrations/20261027000000_payments.sql '
+            'in the SQL Editor first',
+      );
+
+      // B pays 60 of the 100: a pending payment, stored as B giving ('in').
+      expect(await bView.recordPayment(amount: '60'), isTrue);
+      final paid = bView.entries.firstWhere((e) => e.isPayment);
+      expect(paid.myDeltaMinor, 6000);
+      expect(bView.paymentRoom, 4000);
+      final stored = await b.client
+          .from('entries')
+          .select('direction, kind, status')
+          .eq('id', paid.id)
+          .single();
+      expect(stored, {
+        'direction': 'in',
+        'kind': 'payment',
+        'status': 'pending',
+      });
+
+      // The same id sent twice: one entry.
+      final id = '${paid.id.substring(0, 24)}000000000001';
+      final row = {
+        'id': id,
+        'ledger_id': ledgerId,
+        'direction': 'in',
+        'amount_minor': 100,
+        'kind': 'payment',
+      };
+      await b.client.from('entries').insert(row);
+      code = null;
+      try {
+        await b.client.from('entries').insert(row);
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(code, '23505');
+      expect(
+        await b.client.from('entries').select('id').eq('id', id),
+        hasLength(1),
+      );
+
+      // A confirms the 60; the agreed balance is what is left.
+      await aView.load();
+      expect(await aView.confirmEntry(paid.id), isTrue);
+      expect(aView.ledger!.myConfirmedMinor, 4000);
+      await bView.load();
+      expect(bView.ledger!.myConfirmedMinor, -4000);
+      // 40 owed, the 1.00 sent twice above still pending.
+      expect(bView.paymentRoom, 3900);
+
+      // The link shows which entries are payments.
+      final url = await aView.createShareLink();
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      final page = await anon.rpc<dynamic>(
+        'get_shared_ledger',
+        params: {'p_token': url!.substring(url.indexOf('#') + 1)},
+      );
+      final kinds = {
+        for (final e in (page as Map)['entries'] as List)
+          (e as Map)['id']: e['kind'],
+      };
+      expect(kinds[paid.id], 'payment');
+      expect(kinds.values.where((k) => k == 'debt'), hasLength(1));
+      await aView.revokeShareLink();
     },
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),

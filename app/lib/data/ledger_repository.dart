@@ -192,6 +192,7 @@ class LedgerEntry {
     required this.status,
     required this.createdByMe,
     required this.responseNote,
+    this.isPayment = false,
   });
 
   final String id;
@@ -204,6 +205,31 @@ class LedgerEntry {
   final EntryStatus status;
   final bool createdByMe;
   final String? responseNote;
+
+  /// A payment against the agreed balance (`kind = 'payment'`), not a new
+  /// debt. From my side: positive = I paid, negative = I was paid.
+  final bool isPayment;
+}
+
+/// How much the side that owes can still pay: the agreed balance, less that
+/// side's payments still pending or disputed (a disputed one may still be
+/// confirmed). The database checks the same (`_entries_guard_payment`).
+/// Zero when nothing is owed.
+int paymentRoomOf(LedgerSummary ledger, List<LedgerEntry> entries) {
+  final owed = ledger.myConfirmedMinor;
+  if (owed == 0) return 0;
+  // They owe me: their payments are what I took; I owe: what I gave.
+  final payerSign = owed > 0 ? -1 : 1;
+  var held = 0;
+  for (final e in entries) {
+    final open =
+        e.status == EntryStatus.pending || e.status == EntryStatus.disputed;
+    if (e.isPayment && open && e.myDeltaMinor.sign == payerSign) {
+      held += e.myDeltaMinor.abs();
+    }
+  }
+  final room = owed.abs() - held;
+  return room > 0 ? room : 0;
 }
 
 /// What I may do with an entry, mirroring `respond_entry` and `void_entry`:
@@ -243,6 +269,7 @@ List<LedgerEntry> buildEntries(
         status: EntryStatus.values.byName(r['status'] as String),
         createdByMe: r['created_by'] == myId,
         responseNote: r['response_note'] as String?,
+        isPayment: r['kind'] == 'payment',
       ),
   ];
 }
@@ -275,13 +302,17 @@ abstract interface class LedgerRepository {
   Future<List<LedgerEntry>> fetchEntries(LedgerSummary ledger);
 
   /// Records a pending entry; [iGave] is from my side. The other party
-  /// confirms or disputes it.
+  /// confirms or disputes it. [id], made by the caller, makes a second send
+  /// of the same entry fail with `23505` instead of saving it twice. A
+  /// [payment] above what its payer owes fails with `23514`.
   Future<void> addEntry(
     LedgerSummary ledger, {
     required bool iGave,
     required int amountMinor,
     String? note,
     required DateTime occurredOn,
+    String? id,
+    bool payment = false,
   });
 
   /// The other party confirms ([confirm]) or disputes an entry, a dispute
@@ -413,7 +444,7 @@ class SupabaseLedgerRepository implements LedgerRepository {
         .from('entries')
         .select(
           'id, direction, amount_minor, note, occurred_on, status, '
-          'response_note, created_by',
+          'response_note, created_by, kind',
         )
         .eq('ledger_id', ledger.id)
         .order('occurred_on', ascending: false)
@@ -428,15 +459,19 @@ class SupabaseLedgerRepository implements LedgerRepository {
     required int amountMinor,
     String? note,
     required DateTime occurredOn,
+    String? id,
+    bool payment = false,
   }) async {
     // Only these columns are granted; status starts as 'pending' and
     // created_by defaults to auth.uid().
     await _client.from('entries').insert({
+      'id': ?id,
       'ledger_id': ledger.id,
       'direction': entryDirection(iAmOwner: ledger.iAmOwner, iGave: iGave),
       'amount_minor': amountMinor,
       'note': ?note,
       'occurred_on': isoDay(occurredOn),
+      if (payment) 'kind': 'payment',
     });
   }
 

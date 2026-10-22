@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/config.dart';
 import '../core/errors.dart';
+import '../core/ids.dart';
 import '../core/money.dart';
 import '../core/phone_number.dart';
 import '../data/ledger_repository.dart';
@@ -16,11 +17,14 @@ class LedgerController extends ChangeNotifier {
     this._repository,
     this.ledgerId, {
     DateTime Function() now = DateTime.now,
-  }) : _now = now;
+    String Function() newId = newEntryId,
+  }) : _now = now,
+       _newId = newId;
 
   final LedgerRepository _repository;
   final String ledgerId;
   final DateTime Function() _now;
+  final String Function() _newId;
 
   LedgerSummary? _ledger;
 
@@ -83,6 +87,62 @@ class LedgerController extends ChangeNotifier {
     required String amount,
     String note = '',
     DateTime? day,
+  }) => _record(iGave: iGave, amount: amount, note: note, day: day);
+
+  static const futureDayMessage = 'لا يكون تاريخ القيد بعد اليوم.';
+
+  /// How much the side that owes can still pay ([paymentRoomOf]); zero when
+  /// nothing is owed or all of it is held by payments awaiting an answer.
+  int get paymentRoom {
+    final ledger = _ledger;
+    return ledger == null ? 0 : paymentRoomOf(ledger, _entries);
+  }
+
+  /// Records a payment against the agreed balance, in full or in part: the
+  /// other party paying me when they owe me, me paying when I owe. It waits
+  /// for the other party's answer like any entry. Never above
+  /// [paymentRoom]; the database checks the same (`23514`).
+  Future<bool> recordPayment({
+    required String amount,
+    String note = '',
+    DateTime? day,
+  }) {
+    final owed = _ledger?.myConfirmedMinor ?? 0;
+    if (owed == 0) {
+      return Future.value(_failForm('لا رصيد متفق عليه لسداده.'));
+    }
+    return _record(
+      iGave: owed < 0,
+      amount: amount,
+      note: note,
+      day: day,
+      payment: true,
+    );
+  }
+
+  String _overpaid() {
+    final ledger = _ledger;
+    final room = ledger == null
+        ? ''
+        : formatMoney(paymentRoom, ledger.currency);
+    return 'السداد أكبر من المتبقي ($room).';
+  }
+
+  static const overpaidReloaded =
+      'السداد أكبر من المتبقي الآن. أُعيد تحميل الدفتر.';
+
+  /// The id of the entry being saved, kept while the same entry is sent
+  /// again after a failure: if the first send was saved but its answer was
+  /// lost, the copy is refused (`23505`) and counts as saved.
+  String? _draftId;
+  String? _draftKey;
+
+  Future<bool> _record({
+    required bool iGave,
+    required String amount,
+    required String note,
+    required DateTime? day,
+    bool payment = false,
   }) async {
     final ledger = _ledger;
     if (ledger == null || _saving) return false;
@@ -96,20 +156,42 @@ class LedgerController extends ChangeNotifier {
     }
     final on = day == null ? today : DateTime(day.year, day.month, day.day);
     if (on.isAfter(today)) return _failForm(futureDayMessage);
-    return _write(
-      () => _repository.addEntry(
-        ledger,
-        iGave: iGave,
-        amountMinor: minor,
-        note: text.isEmpty ? null : text,
-        occurredOn: on,
-      ),
-      // The database refuses a day after tomorrow (UTC), as a second guard.
-      errors: const {'22023': futureDayMessage},
+    if (payment && minor > paymentRoom) return _failForm(_overpaid());
+    // A changed entry is a new entry, with a new id.
+    final key = '$iGave|$minor|$text|${isoDay(on)}|$payment';
+    if (key != _draftKey) {
+      _draftKey = key;
+      _draftId = _newId();
+    }
+    final id = _draftId!;
+    final ok = await _write(
+      () async {
+        try {
+          await _repository.addEntry(
+            ledger,
+            iGave: iGave,
+            amountMinor: minor,
+            note: text.isEmpty ? null : text,
+            occurredOn: on,
+            id: id,
+            payment: payment,
+          );
+        } on PostgrestException catch (e) {
+          // Sent before and saved; only the answer was lost.
+          if (e.code != '23505') rethrow;
+        }
+      },
+      errors: const {
+        // The database refuses a day after tomorrow (UTC), as a second guard.
+        '22023': futureDayMessage,
+        // Less was owed than this screen knew (the other side acted): the
+        // ledger reloads, so the sheet shows what is left now.
+        '23514': overpaidReloaded,
+      },
     );
+    if (ok) _draftKey = _draftId = null;
+    return ok;
   }
-
-  static const futureDayMessage = 'لا يكون تاريخ القيد بعد اليوم.';
 
   Future<bool> confirmEntry(String entryId) =>
       _write(() => _repository.respondEntry(entryId, confirm: true));
@@ -264,7 +346,8 @@ class LedgerController extends ChangeNotifier {
     try {
       await action();
     } on PostgrestException catch (e) {
-      stale = e.code == '55000' || e.code == 'P0002';
+      // 23514: a payment the other side's answers left no room for.
+      stale = e.code == '55000' || e.code == 'P0002' || e.code == '23514';
       _formError =
           errors[e.code] ??
           switch (e.code) {

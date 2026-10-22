@@ -58,13 +58,18 @@ export function viewOf(data) {
         status: e.status,
         canConfirm: Boolean(e.can_respond) && open,
         canDispute: Boolean(e.can_respond) && e.status === 'pending',
+        payment: e.kind === 'payment',
       };
     }),
   };
 }
 
+/** As in the app: a payment reads "سدّدت" / "استلمت سداداً" from my side. */
 export function entryTitle(e, currency) {
-  return `${e.myDelta > 0 ? 'أعطيت' : 'أخذت'} ${formatMoney(e.myDelta, currency)}`;
+  const verb = e.payment
+    ? (e.myDelta > 0 ? 'سدّدت' : 'استلمت سداداً')
+    : (e.myDelta > 0 ? 'أعطيت' : 'أخذت');
+  return `${verb} ${formatMoney(e.myDelta, currency)}`;
 }
 
 export function entryDetails(e) {

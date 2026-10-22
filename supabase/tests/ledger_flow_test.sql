@@ -359,4 +359,64 @@ select t.ok((select due_on from public.ledgers where id = (select v from t.ids w
 select t.err($$update public.ledgers set due_on = current_date$$, '42501', 'anon cannot set a repayment day');
 reset role;
 
+-- ================= 13. payments (20261027000000) =================
+-- A new shop ledger between A and B: B owes A 100.00 on agreed entries.
+:as_A
+insert into public.businesses (name) values ('Pay shop');
+insert into public.ledgers (business_id, counterparty_name, counterparty_phone)
+  select id, 'Badr', '966500000002' from public.businesses where name = 'Pay shop';
+insert into t.ids select 'L_P', l.id from public.ledgers l
+  join public.businesses b on b.id = l.business_id where b.name = 'Pay shop';
+:as_B
+select public.link_my_ledgers();
+:as_A
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 10000, 'P-debt' from t.ids where k = 'L_P';
+:as_B
+select public.respond_entry((select id from public.entries where note = 'P-debt'), 'confirmed');
+select t.ok((select kind from public.entries where note = 'P-debt') = 'debt', 'an entry is a debt by default');
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, kind)
+               select v, 'in', 10001, 'payment' from t.ids where k = 'L_P'$$,
+             '23514', 'a payment above what is owed is refused');
+insert into public.entries (ledger_id, direction, amount_minor, note, kind)
+  select v, 'in', 6000, 'P1', 'payment' from t.ids where k = 'L_P';
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, kind)
+               select v, 'in', 4001, 'payment' from t.ids where k = 'L_P'$$,
+             '23514', 'a pending payment holds its amount');
+:as_A
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, kind)
+               select v, 'out', 1, 'payment' from t.ids where k = 'L_P'$$,
+             '23514', 'the side that owes nothing cannot pay');
+-- the creditor records the rest as received
+insert into public.entries (ledger_id, direction, amount_minor, note, kind)
+  select v, 'in', 4000, 'P2', 'payment' from t.ids where k = 'L_P';
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, kind)
+               select v, 'in', 1, 'payment' from t.ids where k = 'L_P'$$,
+             '23514', 'nothing is left to pay');
+:as_B
+select public.respond_entry((select id from public.entries where note = 'P2'), 'disputed', 'not received');
+:as_A
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, kind)
+               select v, 'in', 1, 'payment' from t.ids where k = 'L_P'$$,
+             '23514', 'a disputed payment still holds its amount');
+select public.respond_entry((select id from public.entries where note = 'P1'), 'confirmed');
+select t.ok((select confirmed_balance_minor from public.ledger_balances
+              where ledger_id = (select v from t.ids where k = 'L_P')) = 4000,
+            'a confirmed payment lowers the agreed balance');
+select public.void_entry((select id from public.entries where note = 'P2'));
+:as_B
+insert into public.entries (ledger_id, direction, amount_minor, note, kind)
+  select v, 'in', 4000, 'P3', 'payment' from t.ids where k = 'L_P';
+select t.ok(exists (select 1 from public.entries where note = 'P3'), 'a withdrawn payment frees its amount');
+select t.err($$update public.entries set kind = 'debt' where note = 'P3'$$,
+             '42501', 'the kind cannot change afterwards');
+-- the id made by the app: sent twice, saved once
+insert into public.entries (id, ledger_id, direction, amount_minor, note)
+  select '11111111-0000-4000-8000-000000000001', v, 'out', 100, 'ID1' from t.ids where k = 'L_P';
+select t.err($$insert into public.entries (id, ledger_id, direction, amount_minor, note)
+               select '11111111-0000-4000-8000-000000000001', v, 'out', 100, 'ID1' from t.ids where k = 'L_P'$$,
+             '23505', 'the same id sent again is refused');
+select t.ok((select count(*) from public.entries where note = 'ID1') = 1, 'and saved once');
+reset role;
+
 \echo ALL TESTS PASSED

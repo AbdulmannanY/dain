@@ -34,6 +34,16 @@ String formatMoney(int minor, String currency) {
   return '$grouped ${currencySymbol(currency)}';
 }
 
+/// An amount as typed into a field, which [parseMoney] reads back:
+/// 4550 -> '45.50', 500000 -> '5000'. The sign is dropped.
+String plainAmount(int minor) {
+  final abs = minor.abs();
+  final cents = abs % 100;
+  return cents == 0
+      ? '${abs ~/ 100}'
+      : '${abs ~/ 100}.${cents.toString().padLeft(2, '0')}';
+}
+
 /// Largest amount the database accepts (`entries.amount_minor`).
 const maxAmountMinor = 100000000000;
 

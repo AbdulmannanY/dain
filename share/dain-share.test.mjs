@@ -115,6 +115,21 @@ test('viewOf turns the owner-relative ledger to the visitor\'s side', () => {
   assert.equal(entryDetails(v.entries[1]), '21/10/2026 · بانتظار التأكيد');
 });
 
+test('payments read as paid or received from the visitor\'s side', () => {
+  const v = viewOf(
+    ledger([
+      { ...row('p', 'in', 5000, 'pending', false), kind: 'payment' }, // I paid the owner
+      { ...row('q', 'out', 1000, 'pending', true), kind: 'payment' }, // the owner paid me
+      { ...row('d', 'in', 700, 'pending', false), kind: 'debt' },
+      row('old', 'out', 300, 'confirmed', true), // before kinds: a debt
+    ]),
+  );
+  assert.deepEqual(
+    v.entries.map((e) => entryTitle(e, 'SAR')),
+    ['سدّدت 50 ر.س', 'استلمت سداداً 10 ر.س', 'أعطيت 7 ر.س', 'أخذت 3 ر.س'],
+  );
+});
+
 test('checkReason: 1..200 characters, trimmed', () => {
   assert.deepEqual(checkReason('  ليس لي '), { reason: 'ليس لي' });
   assert.deepEqual(checkReason('   '), { error: REASON_ERROR });

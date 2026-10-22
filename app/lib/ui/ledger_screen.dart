@@ -57,17 +57,24 @@ class _LedgerScreenState extends State<LedgerScreen> {
     super.dispose();
   }
 
-  Future<void> _record(bool iGave) async {
+  Future<void> _record(bool iGave, {bool payment = false}) async {
     _ledger.clearFormError();
     final saved = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (_) => _EntrySheet(controller: _ledger, iGave: iGave),
+      builder: (_) =>
+          _EntrySheet(controller: _ledger, iGave: iGave, payment: payment),
     );
     if (saved != true || !mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('سُجّل القيد. ينتظر تأكيد الطرف الآخر.')),
+      SnackBar(
+        content: Text(
+          payment
+              ? 'سُجّل السداد. ينتظر تأكيد الطرف الآخر.'
+              : 'سُجّل القيد. ينتظر تأكيد الطرف الآخر.',
+        ),
+      ),
     );
   }
 
@@ -229,6 +236,14 @@ class _LedgerScreenState extends State<LedgerScreen> {
                         onRemind: _ledger.reminderIsDue && !_ledger.saving
                             ? _remind
                             : null,
+                        // They owe me: I record what they paid; I owe: what
+                        // I paid. Hidden while nothing is left to pay.
+                        onPay: _ledger.paymentRoom > 0
+                            ? () => _record(
+                                ledger.myConfirmedMinor < 0,
+                                payment: true,
+                              )
+                            : null,
                       ),
                       if (_ledger.entries.isEmpty)
                         const _Empty()
@@ -254,6 +269,7 @@ class _Balance extends StatelessWidget {
     required this.overdue,
     required this.refreshError,
     required this.onRemind,
+    required this.onPay,
   });
 
   final LedgerSummary ledger;
@@ -264,6 +280,9 @@ class _Balance extends StatelessWidget {
 
   /// Set while the owner's reminder is due.
   final VoidCallback? onRemind;
+
+  /// Set while some of the agreed balance is left to pay.
+  final VoidCallback? onPay;
 
   @override
   Widget build(BuildContext context) {
@@ -323,6 +342,15 @@ class _Balance extends StatelessWidget {
                   'برقمه.',
                   key: const Key('not_joined_note'),
                   style: muted,
+                ),
+              ],
+              if (onPay != null) ...[
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  key: const Key('record_payment_button'),
+                  onPressed: onPay,
+                  icon: const Icon(Icons.payments_outlined),
+                  label: Text(v > 0 ? 'استلمت سداداً' : 'سدّدت'),
                 ),
               ],
               if (onRemind != null) ...[
@@ -393,9 +421,12 @@ class _EntryTile extends StatelessWidget {
   }
 }
 
-String _entryTitle(LedgerEntry e, String currency) =>
-    '${e.myDeltaMinor > 0 ? 'أعطيت' : 'أخذت'} '
-    '${formatMoney(e.myDeltaMinor, currency)}';
+String _entryTitle(LedgerEntry e, String currency) {
+  final verb = e.isPayment
+      ? (e.myDeltaMinor > 0 ? 'سدّدت' : 'استلمت سداداً')
+      : (e.myDeltaMinor > 0 ? 'أعطيت' : 'أخذت');
+  return '$verb ${formatMoney(e.myDeltaMinor, currency)}';
+}
 
 List<String> _entryDetails(LedgerEntry e) {
   final d = e.occurredOn;
@@ -932,19 +963,28 @@ String dayLabel(DateTime day, DateTime today) {
   return '${d.day}/${d.month}/${d.year}';
 }
 
-/// The amount, note and day of a new entry. Pops true once saved.
+/// The amount, note and day of a new entry, or of a [payment] against the
+/// agreed balance (filled in with all that is left, which can be lowered).
+/// Pops true once saved.
 class _EntrySheet extends StatefulWidget {
-  const _EntrySheet({required this.controller, required this.iGave});
+  const _EntrySheet({
+    required this.controller,
+    required this.iGave,
+    this.payment = false,
+  });
 
   final LedgerController controller;
   final bool iGave;
+  final bool payment;
 
   @override
   State<_EntrySheet> createState() => _EntrySheetState();
 }
 
 class _EntrySheetState extends State<_EntrySheet> {
-  final _amount = TextEditingController();
+  late final _amount = TextEditingController(
+    text: widget.payment ? plainAmount(widget.controller.paymentRoom) : '',
+  );
   final _note = TextEditingController();
 
   /// Today unless an earlier day is picked (a sale written down late).
@@ -971,12 +1011,19 @@ class _EntrySheetState extends State<_EntrySheet> {
   }
 
   Future<void> _save() async {
-    final saved = await widget.controller.addEntry(
-      iGave: widget.iGave,
-      amount: _amount.text,
-      note: _note.text,
-      day: _day,
-    );
+    final c = widget.controller;
+    final saved = widget.payment
+        ? await c.recordPayment(
+            amount: _amount.text,
+            note: _note.text,
+            day: _day,
+          )
+        : await c.addEntry(
+            iGave: widget.iGave,
+            amount: _amount.text,
+            note: _note.text,
+            day: _day,
+          );
     if (saved && mounted) Navigator.of(context).pop(true);
   }
 
@@ -985,6 +1032,15 @@ class _EntrySheetState extends State<_EntrySheet> {
     final theme = Theme.of(context);
     final c = widget.controller;
     final currency = c.ledger?.currency ?? 'SAR';
+    final (title, about) = widget.payment
+        ? (
+            widget.iGave ? 'سدّدت' : 'استلمت سداداً',
+            'سداد من الرصيد المتفق عليه، كاملاً أو جزءاً منه. المتبقي: '
+                '${formatMoney(c.paymentRoom, currency)}.',
+          )
+        : widget.iGave
+        ? ('أعطيت', 'مبلغ أو بضاعة أعطيتها له. يزيد ما لك عليه.')
+        : ('أخذت', 'مبلغ أو بضاعة أخذتها منه. يقلّ ما لك عليه.');
     return Padding(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -998,15 +1054,11 @@ class _EntrySheetState extends State<_EntrySheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              widget.iGave ? 'أعطيت' : 'أخذت',
-              style: theme.textTheme.titleLarge,
-            ),
+            Text(title, style: theme.textTheme.titleLarge),
             const SizedBox(height: 4),
             Text(
-              widget.iGave
-                  ? 'مبلغ أو بضاعة أعطيتها له. يزيد ما لك عليه.'
-                  : 'مبلغ أو بضاعة أخذتها منه، أو سداد منه. يقلّ ما لك عليه.',
+              about,
+              key: const Key('entry_sheet_about'),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
