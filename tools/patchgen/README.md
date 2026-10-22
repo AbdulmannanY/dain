@@ -34,15 +34,19 @@ downloaded bash script per fix. See `docs/agent-script-protocol.md` and
   each a guard that the previous one was applied, and run them in order
   with a minute between them (one OTP per phone per minute, live tests).
 - Docs scripts in a batch cannot know the hashes of commits made on the
-  phone: write `@@HNN@@` in the target and add, before the line
-  "# every anchor was checked above", a lookup by commit subject:
+  phone: write `@@HNN@@` in the target docs, make the patch with gen.py,
+  then let it look them up by commit subject at run time:
 
-      log = subprocess.check_output(["git", "log", "-n", "60",
-                                     "--format=%h %s"], text=True).splitlines()
-      hits = [l.split(" ", 1)[0] for l in log
-              if l.split(" ", 1)[1] == "<exact subject>"]
-      assert len(hits) == 1
-      s = s.replace("@@HNN@@", hits[0])
+      python3 tools/patchgen/hashes.py /tmp/p47.py \
+        44=msgs/dain-44-payments.txt 45=msgs/dain-45-audit.txt
 
-  Lines that already hold a phone-made hash (the "last updated" header)
-  must be matched by a regular expression, not a literal anchor.
+  The message files are the commit messages of those scripts (their first
+  line is the subject). The patch stops if a subject is not found exactly
+  once or a placeholder is left.
+- A hash already pushed (in `main`) is a plain anchor. Lines that hold a
+  hash made on the phone in the same batch must be matched by a regular
+  expression, not a literal anchor.
+- Commit messages must be ASCII (mk.py refuses the script otherwise): no
+  "·", quotes or Arabic.
+- When gen.py says "anchors do not rebuild", look for two changes in one
+  file; it already merges close ones, so it means a change it cannot place.
