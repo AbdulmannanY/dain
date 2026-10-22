@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../core/config.dart';
+import '../core/open_url.dart';
 import '../session/session_controller.dart';
 
-/// "My account": my name as others see it, and deleting the account.
+/// "My account": my name as others see it, the privacy policy, and
+/// deleting the account.
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key, required this.session});
 
@@ -29,6 +32,17 @@ class _AccountScreenState extends State<AccountScreen> {
     setState(() => _saved = false);
     final ok = await widget.session.rename(_name.text);
     if (ok && mounted) setState(() => _saved = true);
+  }
+
+  Future<void> _privacy() async {
+    final messenger = ScaffoldMessenger.of(context);
+    if (!await openUrl(Uri.parse(DainConfig.privacyUrl))) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('تعذّر فتح الصفحة: ${DainConfig.privacyUrl}'),
+        ),
+      );
+    }
   }
 
   Future<void> _delete() async {
@@ -84,7 +98,16 @@ class _AccountScreenState extends State<AccountScreen> {
                   style: TextStyle(color: theme.colorScheme.error),
                 ),
               ],
-              const SizedBox(height: 32),
+              const SizedBox(height: 16),
+              ListTile(
+                key: const Key('privacy_link'),
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.privacy_tip_outlined),
+                title: const Text('سياسة الخصوصية'),
+                subtitle: const Text('ما نحفظه ومن يراه، وتفتح في المتصفح.'),
+                onTap: _privacy,
+              ),
+              const SizedBox(height: 16),
               const Divider(),
               const SizedBox(height: 16),
               Text('حذف الحساب', style: theme.textTheme.titleMedium),

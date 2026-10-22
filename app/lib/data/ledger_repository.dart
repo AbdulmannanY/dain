@@ -91,6 +91,12 @@ String reminderMessage(LedgerSummary l, String url) {
       '$url';
 }
 
+/// The message that goes with a new share link [url].
+String shareLinkMessage(LedgerSummary l, String url) =>
+    'السلام عليكم ${l.title}،\n'
+    'هذا دفترك معي في دائن. تستطيع تأكيد القيود أو الاعتراض عليها من الرابط:\n'
+    '$url';
+
 /// Turns PostgREST rows into summaries for [myId]. A ledger missing from
 /// [balanceRows] (created between the two reads) counts as all zeros.
 /// Sorted by the size of the agreed balance, largest first, then by title.

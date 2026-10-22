@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/money.dart';
+import '../core/open_url.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/ledger_controller.dart';
 import 'common.dart';
@@ -86,15 +87,24 @@ class _LedgerScreenState extends State<LedgerScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(done)));
   }
 
+  /// Copies the reminder (the fallback), then opens a WhatsApp chat with the
+  /// other party's number and the message typed in.
   Future<void> _remind() async {
     final messenger = ScaffoldMessenger.of(context);
     final sent = await _ledger.sendReminder(
       (text) => Clipboard.setData(ClipboardData(text: text)),
     );
+    final phone = _ledger.ledger?.counterpartyPhone;
+    final opened =
+        sent != null &&
+        phone != null &&
+        await openUrl(whatsappUrl(phone, sent));
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          sent != null
+          opened
+              ? 'فُتح واتساب برسالة التذكير، ونُسخت أيضاً.'
+              : sent != null
               ? 'نُسخت رسالة التذكير. أرسلها له عبر واتساب أو رسالة.'
               : _ledger.formError ?? 'تعذّر إتمام العملية. حاول مجدداً.',
         ),
@@ -321,7 +331,7 @@ class _Balance extends StatelessWidget {
                   key: const Key('send_reminder_button'),
                   onPressed: onRemind,
                   icon: const Icon(Icons.notifications_active_outlined),
-                  label: const Text('تذكير مستحق: انسخ الرسالة'),
+                  label: const Text('تذكير مستحق: أرسله عبر واتساب'),
                 ),
               ],
               if (refreshError != null) ...[
@@ -557,8 +567,8 @@ class _ReminderSheet extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 'يظهر «تذكير مستحق» حين يكون لك عليه رصيد متفق عليه ومرّت المدة. '
-                'تُنسخ رسالة فيها رابط جديد وترسلها أنت، والرابط الجديد يُبطل '
-                'السابق.',
+                'يُفتح واتساب برسالة فيها رابط جديد (وتُنسخ أيضاً) وترسلها أنت، '
+                'والرابط الجديد يُبطل السابق.',
                 style: muted,
               ),
               const SizedBox(height: 16),
@@ -634,6 +644,22 @@ class _ShareSheet extends StatelessWidget {
     if (url != null) await Clipboard.setData(ClipboardData(text: url));
   }
 
+  /// A WhatsApp chat with the other party, the link and a line about it
+  /// typed in. When WhatsApp cannot open, the link is already copied.
+  Future<void> _sendOnWhatsApp(BuildContext context, String url) async {
+    final ledger = controller.ledger;
+    final phone = ledger?.counterpartyPhone;
+    if (ledger == null || phone == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (!await openUrl(whatsappUrl(phone, shareLinkMessage(ledger, url)))) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('تعذّر فتح واتساب. الرابط منسوخ، أرسله بنفسك.'),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -674,6 +700,15 @@ class _ShareSheet extends StatelessWidget {
                   style: muted,
                 ),
                 const SizedBox(height: 12),
+                if (c.ledger?.counterpartyPhone != null) ...[
+                  FilledButton.tonalIcon(
+                    key: const Key('share_whatsapp_button'),
+                    onPressed: () => _sendOnWhatsApp(context, url),
+                    icon: const Icon(Icons.send_outlined),
+                    label: const Text('إرساله عبر واتساب'),
+                  ),
+                  const SizedBox(height: 8),
+                ],
               ],
               FilledButton(
                 key: const Key('create_link_button'),

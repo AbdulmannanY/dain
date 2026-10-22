@@ -19,6 +19,10 @@ dependencies:
   # Stay on the method-channel implementation until that is fixed upstream;
   # test/release_plugins_test.dart keeps this from creeping back.
   shared_preferences_android: ">=2.4.28 <2.5.0"
+  # Opens WhatsApp with the reminder and the privacy page in the browser.
+  # Already in the APK before it was named here: supabase_flutter depends
+  # on it, so naming it adds no package and no native code.
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   flutter_test:

@@ -20,4 +20,7 @@ abstract final class DainConfig {
   );
 
   static String shareUrl(String token) => '$shareBaseUrl#$token';
+
+  /// The privacy policy (share/privacy.html, published with the page).
+  static const privacyUrl = '${shareBaseUrl}privacy.html';
 }
