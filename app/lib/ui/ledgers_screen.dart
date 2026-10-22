@@ -29,6 +29,7 @@ class LedgersScreen extends StatefulWidget {
 
 class _LedgersScreenState extends State<LedgersScreen> {
   late final LedgersController _ledgers = LedgersController(widget.repository);
+  final _search = TextEditingController();
 
   @override
   void initState() {
@@ -39,6 +40,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
   @override
   void dispose() {
     _ledgers.dispose();
+    _search.dispose();
     super.dispose();
   }
 
@@ -120,6 +122,7 @@ class _LedgersScreenState extends State<LedgersScreen> {
         listenable: _ledgers,
         builder: (context, _) {
           final list = _ledgers.ledgers;
+          final visible = _ledgers.visible ?? const <LedgerSummary>[];
           if (list == null) {
             return _ledgers.error == null
                 ? const Center(child: CircularProgressIndicator())
@@ -141,12 +144,23 @@ class _LedgersScreenState extends State<LedgersScreen> {
                 ),
                 if (list.isEmpty)
                   const _Empty()
-                else
-                  for (final l in list)
+                else ...[
+                  _SearchBar(controller: _ledgers, text: _search),
+                  if (visible.isEmpty)
+                    Padding(
+                      key: const Key('search_empty'),
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        'لا دفتر يطابق «${_ledgers.query.trim()}».',
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  for (final l in visible)
                     _LedgerTile(
                       ledger: l,
                       onTap: () => _showLedger(l.id, l.title),
                     ),
+                ],
               ],
             ),
           );
@@ -260,6 +274,68 @@ class _TotalBox extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Search by name, shop or number, and the order of the list.
+class _SearchBar extends StatelessWidget {
+  const _SearchBar({required this.controller, required this.text});
+
+  final LedgersController controller;
+  final TextEditingController text;
+
+  static const _sorts = <(LedgerSort, String)>[
+    (LedgerSort.balance, 'الأكبر رصيداً'),
+    (LedgerSort.name, 'الاسم'),
+    (LedgerSort.open, 'المعلّق أولاً'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            key: const Key('ledger_search_field'),
+            controller: text,
+            onChanged: c.search,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'ابحث بالاسم أو المحل أو الرقم',
+              prefixIcon: const Icon(Icons.search),
+              isDense: true,
+              suffixIcon: c.query.isEmpty
+                  ? null
+                  : IconButton(
+                      key: const Key('clear_search_button'),
+                      tooltip: 'مسح البحث',
+                      icon: const Icon(Icons.close),
+                      onPressed: () {
+                        text.clear();
+                        c.search('');
+                      },
+                    ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            children: [
+              for (final (sort, label) in _sorts)
+                ChoiceChip(
+                  key: Key('sort_${sort.name}'),
+                  label: Text(label),
+                  selected: c.sort == sort,
+                  onSelected: (_) => c.sortBy(sort),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
