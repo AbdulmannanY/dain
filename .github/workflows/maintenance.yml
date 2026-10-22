@@ -1,0 +1,98 @@
+name: Supabase keepalive and backup
+
+# The free Supabase plan pauses a project after 7 days without requests and
+# keeps no backups. This asks the database something harmless every three
+# days (a failure means it is paused or down, and GitHub emails it), and on
+# Fridays saves an encrypted copy of the data as a 30-day artifact.
+#
+# The backup needs two repository secrets (Settings -> Secrets and
+# variables -> Actions); without them it is skipped with a warning:
+#   DAIN_DB_URL             Supabase -> Connect -> Session pooler URI (IPv4;
+#                           the direct connection is IPv6 only), with the
+#                           database password filled in.
+#   DAIN_BACKUP_PASSPHRASE  a long random passphrase, kept outside GitHub.
+#                           The repository is public, so artifacts must be
+#                           unreadable without it.
+# Restore: docs/START-HERE.md section 5.
+
+on:
+  schedule:
+    - cron: '17 6 */3 * *' # keepalive
+    - cron: '41 2 * * 5' # backup (also keeps the project awake)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SUPABASE_URL: https://mxnjwaofjlxxdjizjsfb.supabase.co
+  # Publishable by design (it ships in the app and the share page).
+  SUPABASE_KEY: sb_publishable_JTVwmwscU9kAwi3PM2EQMQ_shfAYx5X
+
+jobs:
+  keepalive:
+    name: Keep Supabase awake
+    if: github.event.schedule != '41 2 * * 5'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Ask the database something harmless
+        run: |
+          # A token that cannot exist: a running database answers P0002
+          # (invalid or expired link) and nothing is written.
+          body="$(curl -sS -m 60 -X POST "$SUPABASE_URL/rest/v1/rpc/get_shared_ledger" \
+            -H "apikey: $SUPABASE_KEY" -H 'Content-Type: application/json' \
+            -d '{"p_token":"keepalive-not-a-real-token-000000"}' || true)"
+          echo "$body"
+          echo "$body" | grep -q '"P0002"' || {
+            echo "::error::Supabase did not answer as expected: paused or down? Restore it from the dashboard."
+            exit 1
+          }
+
+  backup:
+    name: Encrypted backup
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '41 2 * * 5'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DB_URL: ${{ secrets.DAIN_DB_URL }}
+      PASSPHRASE: ${{ secrets.DAIN_BACKUP_PASSPHRASE }}
+    steps:
+      - name: Secrets present
+        id: check
+        run: |
+          if [ -z "$DB_URL" ] || [ -z "$PASSPHRASE" ]; then
+            echo "::warning::backup skipped: add DAIN_DB_URL and DAIN_BACKUP_PASSPHRASE (docs/START-HERE.md)"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dump the data and encrypt it
+        if: steps.check.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          # The schema is in supabase/migrations; this keeps the rows: every
+          # public table, and auth.users (profiles point at it). pg_dump 18
+          # reads older servers. Row security stays on, so a role that RLS
+          # would filter fails here instead of saving a partial copy.
+          docker run --rm -e DB_URL postgres:18 sh -c \
+            'pg_dump "$DB_URL" --data-only --no-owner --no-privileges --table="public.*" --table=auth.users' \
+            > dump.sql
+          for t in profiles ledgers entries; do
+            grep -q "^COPY public\.$t " dump.sql || { echo "::error::no public.$t in the dump"; exit 1; }
+          done
+          name="dain-$(date -u +%Y-%m-%d).sql.gpg"
+          printf '%s' "$PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback \
+            --passphrase-fd 0 --symmetric --cipher-algo AES256 -o "$name" dump.sql
+          rm -f dump.sql
+          ls -l "$name"
+
+      - uses: actions/upload-artifact@v6
+        if: steps.check.outputs.run == 'true'
+        with:
+          name: dain-backup-${{ github.run_number }}
+          path: dain-*.sql.gpg
+          if-no-files-found: error
+          retention-days: 30
