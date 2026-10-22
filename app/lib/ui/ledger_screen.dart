@@ -33,14 +33,25 @@ class _LedgerScreenState extends State<LedgerScreen> {
     widget.ledgerId,
   );
 
+  /// Back in the app: reload, since the other party may have confirmed,
+  /// disputed or recorded something meanwhile. An open sheet follows the
+  /// reloaded entries.
+  late final AppLifecycleListener _lifecycle;
+
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(
+      onResume: () {
+        if (mounted) _ledger.load();
+      },
+    );
     _ledger.load();
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _ledger.dispose();
     super.dispose();
   }

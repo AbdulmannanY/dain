@@ -31,14 +31,27 @@ class _LedgersScreenState extends State<LedgersScreen> {
   late final LedgersController _ledgers = LedgersController(widget.repository);
   final _search = TextEditingController();
 
+  late final AppLifecycleListener _lifecycle;
+
+  /// Back in the app (the other party may have answered meanwhile): reload,
+  /// unless a ledger's screen is on top; that one reloads itself, and the
+  /// list reloads when it closes.
+  void _resumed() {
+    if (mounted && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      _ledgers.load();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    _lifecycle = AppLifecycleListener(onResume: _resumed);
     _ledgers.load();
   }
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _ledgers.dispose();
     _search.dispose();
     super.dispose();
