@@ -1278,6 +1278,73 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'both sides record the same payment at once: the database keeps one',
+    () async {
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live race ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      final bView = LedgerController(
+        SupabaseLedgerRepository(b.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      addTearDown(bView.dispose);
+      await aView.load();
+      expect(await aView.addEntry(iGave: true, amount: '50'), isTrue);
+      await bView.load();
+      expect(await bView.confirmEntry(bView.entries.single.id), isTrue);
+      await aView.load();
+      // Each screen still shows all 50 as left to pay.
+      expect((aView.paymentRoom, bView.paymentRoom), (5000, 5000));
+
+      // A records "received 50" while B records "paid 50".
+      final results = await Future.wait([
+        aView.recordPayment(amount: '50'),
+        bView.recordPayment(amount: '50'),
+      ]);
+      expect(
+        results.where((ok) => ok),
+        hasLength(1),
+        reason:
+            '${aView.formError} / ${bView.formError}: apply supabase/'
+            'migrations/20261027000000_payments.sql in the SQL Editor first',
+      );
+      final refused = results.first ? bView : aView;
+      expect(refused.formError, LedgerController.overpaidReloaded);
+      // The refused side reloaded: nothing is left to record.
+      expect(refused.paymentRoom, 0);
+
+      final rows = await a.client
+          .from('entries')
+          .select('amount_minor')
+          .eq('ledger_id', ledgerId)
+          .eq('kind', 'payment');
+      expect(rows, [
+        {'amount_minor': 5000},
+      ]);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Keep this test last: it deletes B. The next run signs B up again (a new
   // profile), and link_my_ledgers() reattaches every ledger for B's phone.
   test(

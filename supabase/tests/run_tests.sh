@@ -9,3 +9,5 @@ psql -v ON_ERROR_STOP=1 -q -d "$DB" -f tests/supabase_stub.sql
 for f in migrations/*.sql; do psql -v ON_ERROR_STOP=1 -q -d "$DB" -f "$f"; done
 psql -v ON_ERROR_STOP=1 -q -d "$DB" -f tests/ledger_flow_test.sql
 psql -qc "drop database $DB" >/dev/null
+# Payments and saves sent at the same moment, on a database of their own.
+bash tests/concurrency_test.sh

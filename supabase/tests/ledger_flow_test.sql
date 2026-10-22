@@ -470,4 +470,33 @@ select t.err($$delete from public.entry_events$$, '42501', 'or deletes from it')
 select t.err($$select count(*) from public.entry_events$$, '42501', 'anon cannot read it');
 reset role;
 
+-- ================= 15. nothing financial can be forged from the client =================
+-- An entry starts pending, by me, unanswered; afterwards only the functions
+-- move its status, and nothing else about it changes.
+:as_B
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, status)
+               select v, 'in', 100, 'confirmed' from t.ids where k = 'L_P'$$,
+             '42501', 'an entry cannot be born confirmed');
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, created_by)
+               select v, 'in', 100, 'aaaaaaaa-0000-0000-0000-000000000001' from t.ids where k = 'L_P'$$,
+             '42501', 'or recorded in the other side''s name');
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, responded_at, responded_via)
+               select v, 'in', 100, now(), 'app' from t.ids where k = 'L_P'$$,
+             '42501', 'or carry an answer');
+select t.err($$update public.entries set amount_minor = 1 where note = 'P3'$$,
+             '42501', 'the amount cannot change afterwards');
+select t.err($$update public.entries set ledger_id = ledger_id where note = 'P3'$$,
+             '42501', 'nor the ledger');
+select t.err($$update public.entries set direction = 'out' where note = 'P3'$$,
+             '42501', 'nor the direction');
+select t.err($$delete from public.entries where note = 'P3'$$,
+             '42501', 'an entry is never deleted by hand');
+select t.err($$insert into public.ledger_balances (ledger_id) select v from t.ids where k = 'L_P'$$,
+             '55000', 'balances are computed, never written (a view)');
+:as_C
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, kind)
+               select v, 'in', 100, 'payment' from t.ids where k = 'L_P'$$,
+             '42501', 'an outsider cannot pay into a ledger');
+reset role;
+
 \echo ALL TESTS PASSED
