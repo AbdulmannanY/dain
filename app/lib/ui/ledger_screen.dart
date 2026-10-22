@@ -822,7 +822,15 @@ class _Empty extends StatelessWidget {
   }
 }
 
-/// The amount and note of a new entry. Pops true once saved.
+/// "اليوم", "أمس", or the day as 21/10/2026.
+String dayLabel(DateTime day, DateTime today) {
+  final d = DateTime(day.year, day.month, day.day);
+  if (d == today) return 'اليوم';
+  if (d == DateTime(today.year, today.month, today.day - 1)) return 'أمس';
+  return '${d.day}/${d.month}/${d.year}';
+}
+
+/// The amount, note and day of a new entry. Pops true once saved.
 class _EntrySheet extends StatefulWidget {
   const _EntrySheet({required this.controller, required this.iGave});
 
@@ -837,6 +845,9 @@ class _EntrySheetState extends State<_EntrySheet> {
   final _amount = TextEditingController();
   final _note = TextEditingController();
 
+  /// Today unless an earlier day is picked (a sale written down late).
+  late DateTime _day = widget.controller.today;
+
   @override
   void dispose() {
     _amount.dispose();
@@ -844,11 +855,25 @@ class _EntrySheetState extends State<_EntrySheet> {
     super.dispose();
   }
 
+  Future<void> _pickDay() async {
+    final today = widget.controller.today;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _day,
+      currentDate: today,
+      firstDate: DateTime(today.year - 5, today.month, today.day),
+      lastDate: today,
+      helpText: 'تاريخ القيد',
+    );
+    if (picked != null && mounted) setState(() => _day = picked);
+  }
+
   Future<void> _save() async {
     final saved = await widget.controller.addEntry(
       iGave: widget.iGave,
       amount: _amount.text,
       note: _note.text,
+      day: _day,
     );
     if (saved && mounted) Navigator.of(context).pop(true);
   }
@@ -903,6 +928,13 @@ class _EntrySheetState extends State<_EntrySheet> {
               key: const Key('note_field'),
               controller: _note,
               decoration: const InputDecoration(labelText: 'ملاحظة (اختيارية)'),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('entry_day_button'),
+              onPressed: c.saving ? null : _pickDay,
+              icon: const Icon(Icons.event_outlined),
+              label: Text('التاريخ: ${dayLabel(_day, c.today)}'),
             ),
             if (c.formError != null) ...[
               const SizedBox(height: 12),

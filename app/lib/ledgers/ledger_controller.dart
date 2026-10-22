@@ -69,13 +69,20 @@ class LedgerController extends ChangeNotifier {
     _notify();
   }
 
-  /// Records an entry dated today; [iGave] is from my side. Returns whether
-  /// it was saved. The list reloads after a save; a failed reload shows in
-  /// [error] and keeps the old list.
+  /// My local day now: the latest day an entry may have.
+  DateTime get today {
+    final now = _now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  /// Records an entry on [day] (today when null, never after today); [iGave]
+  /// is from my side. Returns whether it was saved. The list reloads after a
+  /// save; a failed reload shows in [error] and keeps the old list.
   Future<bool> addEntry({
     required bool iGave,
     required String amount,
     String note = '',
+    DateTime? day,
   }) async {
     final ledger = _ledger;
     if (ledger == null || _saving) return false;
@@ -87,17 +94,22 @@ class LedgerController extends ChangeNotifier {
     if (text.runes.length > 200) {
       return _failForm('الملاحظة حتى 200 حرف.');
     }
-    final now = _now();
+    final on = day == null ? today : DateTime(day.year, day.month, day.day);
+    if (on.isAfter(today)) return _failForm(futureDayMessage);
     return _write(
       () => _repository.addEntry(
         ledger,
         iGave: iGave,
         amountMinor: minor,
         note: text.isEmpty ? null : text,
-        occurredOn: DateTime(now.year, now.month, now.day),
+        occurredOn: on,
       ),
+      // The database refuses a day after tomorrow (UTC), as a second guard.
+      errors: const {'22023': futureDayMessage},
     );
   }
+
+  static const futureDayMessage = 'لا يكون تاريخ القيد بعد اليوم.';
 
   Future<bool> confirmEntry(String entryId) =>
       _write(() => _repository.respondEntry(entryId, confirm: true));

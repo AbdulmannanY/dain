@@ -318,4 +318,25 @@ select t.ok(public.respond_entry((select v from t.ids where k = 'X2'), 'confirme
             'the owner can still confirm it');
 reset role;
 
+-- ================= 11. the day of an entry (20261025000000) =================
+:as_A
+insert into public.entries (ledger_id, direction, amount_minor, note, occurred_on)
+  select v, 'out', 100, 'D1', current_date - 30 from t.ids where k = 'L_B';
+select t.ok((select occurred_on from public.entries where note = 'D1') = current_date - 30,
+            'an entry keeps an earlier day');
+insert into public.entries (ledger_id, direction, amount_minor, note, occurred_on)
+  select v, 'out', 100, 'D2', current_date + 1 from t.ids where k = 'L_B';
+select t.ok(exists (select 1 from public.entries where note = 'D2'),
+            'tomorrow is accepted (the app''s day runs ahead of UTC)');
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, occurred_on)
+               select v, 'out', 100, current_date + 2 from t.ids where k = 'L_B'$$,
+             '22023', 'a day after tomorrow is refused');
+:as_B
+select t.err($$insert into public.entries (ledger_id, direction, amount_minor, occurred_on)
+               select v, 'in', 100, current_date + 30 from t.ids where k = 'L_B'$$,
+             '22023', 'the counterparty cannot date one in the future either');
+select t.err($$update public.entries set occurred_on = current_date - 1 where note = 'D1'$$,
+             '42501', 'the day cannot be changed afterwards');
+reset role;
+
 \echo ALL TESTS PASSED

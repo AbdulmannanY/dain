@@ -1,5 +1,6 @@
 import 'package:dain/app.dart';
 import 'package:dain/data/ledger_repository.dart';
+import 'package:dain/ledgers/ledger_controller.dart';
 import 'package:dain/session/session_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -241,5 +242,94 @@ void main() {
     await tester.tap(find.byKey(const Key('retry_button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('entries_empty')), findsOneWidget);
+  });
+
+  testWidgets('an entry written down late keeps the day picked for it', (
+    tester,
+  ) async {
+    ledgers.ledgers = [ledger()];
+    await openLedger(tester);
+    await tester.tap(find.byKey(const Key('add_gave_button')));
+    await tester.pumpAndSettle();
+    final dayButton = find.byKey(const Key('entry_day_button'));
+    expect(
+      find.descendant(of: dayButton, matching: find.text('التاريخ: اليوم')),
+      findsOneWidget,
+    );
+
+    // The first of this month, or of the last one when today is the first.
+    final t = today();
+    await tester.tap(dayButton);
+    await tester.pumpAndSettle();
+    var picked = DateTime(t.year, t.month, 1);
+    if (t.day == 1) {
+      await tester.tap(find.byTooltip('الشهر السابق'));
+      await tester.pumpAndSettle();
+      picked = DateTime(t.year, t.month - 1, 1);
+    }
+    await tester.tap(find.text('1'));
+    await tester.tap(find.text('حسنًا'));
+    await tester.pumpAndSettle();
+    final label = t.day == 2
+        ? 'أمس'
+        : '${picked.day}/${picked.month}/${picked.year}';
+    expect(
+      find.descendant(of: dayButton, matching: find.text('التاريخ: $label')),
+      findsOneWidget,
+    );
+
+    await tester.enterText(find.byKey(const Key('amount_field')), '12');
+    await tester.tap(find.byKey(const Key('save_entry_button')));
+    await tester.pumpAndSettle();
+    expect(ledgers.added, [('L1', 'out', 1200, null, picked)]);
+  });
+
+  group('the day of a new entry', () {
+    final now = DateTime(2026, 10, 22, 23, 30);
+
+    Future<LedgerController> loaded() async {
+      ledgers.ledgers = [ledger()];
+      final c = LedgerController(ledgers, 'L1', now: () => now);
+      await c.load();
+      return c;
+    }
+
+    test('is today unless given, without the time of day', () async {
+      final c = await loaded();
+      expect(c.today, DateTime(2026, 10, 22));
+      expect(await c.addEntry(iGave: true, amount: '1'), isTrue);
+      expect(
+        await c.addEntry(
+          iGave: true,
+          amount: '2',
+          day: DateTime(2026, 9, 30, 14),
+        ),
+        isTrue,
+      );
+      expect(ledgers.added.map((a) => a.$5), [
+        DateTime(2026, 10, 22),
+        DateTime(2026, 9, 30),
+      ]);
+    });
+
+    test('a day after today is refused before saving', () async {
+      final c = await loaded();
+      expect(
+        await c.addEntry(iGave: true, amount: '1', day: DateTime(2026, 10, 23)),
+        isFalse,
+      );
+      expect(c.formError, LedgerController.futureDayMessage);
+      expect(ledgers.added, isEmpty);
+    });
+
+    test('the database refusing the day (22023) says why', () async {
+      final c = await loaded();
+      ledgers.failNextAddWith = const PostgrestException(
+        message: 'an entry cannot be dated in the future',
+        code: '22023',
+      );
+      expect(await c.addEntry(iGave: false, amount: '1'), isFalse);
+      expect(c.formError, LedgerController.futureDayMessage);
+    });
   });
 }

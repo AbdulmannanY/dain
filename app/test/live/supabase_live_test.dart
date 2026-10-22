@@ -1016,6 +1016,54 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'an entry keeps the earlier day picked; the database refuses a future one',
+    () async {
+      final aRepo = SupabaseLedgerRepository(a.client);
+      final shop = await aRepo.createBusiness(
+        'live day ${DateTime.now().toUtc()}',
+      );
+      final ledgerId = await aRepo.openLedger(
+        counterpartyName: 'مؤقت',
+        phone: '966500000009',
+        businessId: shop.id,
+      );
+      final view = LedgerController(aRepo, ledgerId);
+      addTearDown(view.dispose);
+      await view.load();
+      final t = view.today;
+      final day = DateTime(t.year, t.month, t.day - 3);
+      expect(
+        await view.addEntry(iGave: true, amount: '5', day: day),
+        isTrue,
+        reason: view.formError,
+      );
+      expect(view.entries.single.occurredOn, day);
+
+      // Past the app's own check, straight through PostgREST.
+      String? code;
+      try {
+        await a.client.from('entries').insert({
+          'ledger_id': ledgerId,
+          'direction': 'out',
+          'amount_minor': 100,
+          'occurred_on': isoDay(DateTime(t.year, t.month, t.day + 5)),
+        });
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(
+        code,
+        '22023',
+        reason:
+            'apply supabase/migrations/20261025000000_entry_date.sql '
+            'in the SQL Editor first',
+      );
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Keep this test last: it deletes B. The next run signs B up again (a new
   // profile), and link_my_ledgers() reattaches every ledger for B's phone.
   test(
