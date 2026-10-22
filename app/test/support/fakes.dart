@@ -344,6 +344,7 @@ class FakeLedgers implements LedgerRepository {
         remindEveryDays: l.remindEveryDays,
         lastRemindedAt: l.lastRemindedAt,
         counterpartyPhone: phone ?? l.counterpartyPhone,
+        dueOn: l.dueOn,
       ),
     );
   }
@@ -351,6 +352,27 @@ class FakeLedgers implements LedgerRepository {
   @override
   Future<void> setReminder(String ledgerId, int? days) async =>
       _replace(ledgerId, (l) => _withReminder(l, days, l.lastRemindedAt));
+
+  /// (ledger id, day or null) of every repayment day set.
+  final dueDates = <(String, DateTime?)>[];
+
+  /// Like RLS: only the owner's update finds the row.
+  @override
+  Future<void> setDueDate(String ledgerId, DateTime? day) async {
+    final error = failNextActionWith;
+    if (error != null) {
+      failNextActionWith = null;
+      throw error;
+    }
+    if (!ledgers.any((l) => l.id == ledgerId && l.iAmOwner)) {
+      throw StateError('ledger not found');
+    }
+    dueDates.add((ledgerId, day));
+    _replace(
+      ledgerId,
+      (l) => _withReminder(l, l.remindEveryDays, l.lastRemindedAt, due: day),
+    );
+  }
 
   @override
   Future<void> markReminded(String ledgerId) async {
@@ -367,8 +389,9 @@ class FakeLedgers implements LedgerRepository {
   static LedgerSummary _withReminder(
     LedgerSummary l,
     int? days,
-    DateTime? last,
-  ) => LedgerSummary(
+    DateTime? last, {
+    Object? due = _keep,
+  }) => LedgerSummary(
     id: l.id,
     iAmOwner: l.iAmOwner,
     title: l.title,
@@ -382,7 +405,10 @@ class FakeLedgers implements LedgerRepository {
     remindEveryDays: days,
     lastRemindedAt: last,
     counterpartyPhone: l.counterpartyPhone,
+    dueOn: identical(due, _keep) ? l.dueOn : due as DateTime?,
   );
+
+  static const _keep = Object();
 
   /// Shops holding ledgers: deleting one is refused like the FK does.
   final shopsWithLedgers = <String>{};

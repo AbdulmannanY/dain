@@ -145,7 +145,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
               if (ledger != null && ledger.iAmOwner)
                 IconButton(
                   key: const Key('reminder_button'),
-                  tooltip: 'التذكير',
+                  tooltip: 'التذكير وموعد السداد',
                   icon: Icon(
                     ledger.remindEveryDays == null
                         ? Icons.notifications_none
@@ -203,6 +203,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
                     children: [
                       _Balance(
                         ledger: ledger,
+                        overdue: _ledger.overdue,
                         refreshError: _ledger.error,
                         onRemind: _ledger.reminderIsDue && !_ledger.saving
                             ? _remind
@@ -229,11 +230,15 @@ class _LedgerScreenState extends State<LedgerScreen> {
 class _Balance extends StatelessWidget {
   const _Balance({
     required this.ledger,
+    required this.overdue,
     required this.refreshError,
     required this.onRemind,
   });
 
   final LedgerSummary ledger;
+
+  /// [paymentOverdue] today.
+  final bool overdue;
   final String? refreshError;
 
   /// Set while the owner's reminder is due.
@@ -281,6 +286,15 @@ class _Balance extends StatelessWidget {
                 Text('${l.pendingCount} بانتظار التأكيد', style: muted),
               if (l.disputedCount > 0)
                 Text('${l.disputedCount} معترض عليه', style: muted),
+              if (l.dueOn != null)
+                Text(
+                  'موعد السداد: ${shortDay(l.dueOn!)}'
+                  '${overdue ? ' · فات الموعد' : ''}',
+                  key: const Key('due_text'),
+                  style: overdue
+                      ? TextStyle(color: theme.colorScheme.error)
+                      : muted,
+                ),
               if (!l.otherPartyJoined) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -477,7 +491,8 @@ class _CounterpartySheetState extends State<_CounterpartySheet> {
 }
 
 /// The owner's reminder period. A reminder is due when the other party owes
-/// on agreed entries and the period has passed since the last one.
+/// on agreed entries and the period has passed since the last one. The
+/// repayment day is set here too.
 class _ReminderSheet extends StatelessWidget {
   const _ReminderSheet({required this.controller});
 
@@ -490,6 +505,24 @@ class _ReminderSheet extends StatelessWidget {
     (14, 'كل أسبوعين'),
     (30, 'كل شهر'),
   ];
+
+  Future<void> _pickDue(BuildContext context) async {
+    final today = controller.today;
+    final first = DateTime(today.year - 1, today.month, today.day);
+    final last = DateTime(today.year + 5, today.month, today.day);
+    final due = controller.ledger?.dueOn;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: due == null || due.isBefore(first) || due.isAfter(last)
+          ? today
+          : due,
+      currentDate: today,
+      firstDate: first,
+      lastDate: last,
+      helpText: 'موعد السداد',
+    );
+    if (picked != null) await controller.setDueDate(picked);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -539,6 +572,29 @@ class _ReminderSheet extends StatelessWidget {
                   style: muted,
                 ),
               ],
+              const SizedBox(height: 24),
+              Text('موعد السداد', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 4),
+              Text(
+                'يراه الطرف الآخر في دفتره، ويُذكر في رسالة التذكير. لا يغيّر '
+                'أي رصيد.',
+                style: muted,
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const Key('due_date_button'),
+                onPressed: c.saving ? null : () => _pickDue(context),
+                icon: const Icon(Icons.event_outlined),
+                label: Text(
+                  l?.dueOn == null ? 'تحديد موعد' : shortDay(l!.dueOn!),
+                ),
+              ),
+              if (l?.dueOn != null)
+                TextButton(
+                  key: const Key('clear_due_button'),
+                  onPressed: c.saving ? null : () => c.setDueDate(null),
+                  child: const Text('إزالة الموعد'),
+                ),
               if (c.formError != null) ...[
                 const SizedBox(height: 12),
                 Text(

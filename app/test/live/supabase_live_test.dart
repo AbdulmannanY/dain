@@ -1064,6 +1064,62 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'the owner sets a repayment day; the other party sees it, cannot move it',
+    () async {
+      final shop = await a.client
+          .from('businesses')
+          .insert({'name': 'live due ${DateTime.now().toUtc()}'})
+          .select('id')
+          .single();
+      final ledger = await a.client
+          .from('ledgers')
+          .insert({
+            'business_id': shop['id'],
+            'counterparty_name': 'تجربة ب',
+            'counterparty_phone': '966500000002',
+          })
+          .select('id')
+          .single();
+      final ledgerId = ledger['id'] as String;
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+
+      final aView = LedgerController(
+        SupabaseLedgerRepository(a.client),
+        ledgerId,
+      );
+      addTearDown(aView.dispose);
+      await aView.load();
+      final t = aView.today;
+      final due = DateTime(t.year, t.month, t.day + 10);
+      expect(
+        await aView.setDueDate(due),
+        isTrue,
+        reason:
+            '${aView.formError}: apply supabase/migrations/'
+            '20261026000000_due_date.sql in the SQL Editor first',
+      );
+      expect(aView.ledger!.dueOn, due);
+
+      final bRepo = SupabaseLedgerRepository(b.client);
+      expect((await bRepo.fetchLedger(ledgerId)).dueOn, due);
+      // RLS gives B no row to update.
+      Object? refused;
+      try {
+        await bRepo.setDueDate(ledgerId, null);
+      } catch (e) {
+        refused = e;
+      }
+      expect(refused, isA<StateError>());
+      expect((await bRepo.fetchLedger(ledgerId)).dueOn, due);
+
+      expect(await aView.setDueDate(null), isTrue, reason: aView.formError);
+      expect(aView.ledger!.dueOn, isNull);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Keep this test last: it deletes B. The next run signs B up again (a new
   // profile), and link_my_ledgers() reattaches every ledger for B's phone.
   test(

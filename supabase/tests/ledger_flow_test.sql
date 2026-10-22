@@ -339,4 +339,24 @@ select t.err($$update public.entries set occurred_on = current_date - 1 where no
              '42501', 'the day cannot be changed afterwards');
 reset role;
 
+-- ================= 12. the repayment day (20261026000000) =================
+:as_A
+update public.ledgers set due_on = current_date + 10 where id = (select v from t.ids where k = 'L_B');
+select t.ok((select due_on from public.ledgers where id = (select v from t.ids where k = 'L_B')) = current_date + 10,
+            'the owner sets a repayment day');
+:as_B
+select t.ok((select due_on from public.ledgers where id = (select v from t.ids where k = 'L_B')) = current_date + 10,
+            'the counterparty sees it');
+update public.ledgers set due_on = current_date + 99 where id = (select v from t.ids where k = 'L_B');
+reset role;
+select t.ok((select due_on from public.ledgers where id = (select v from t.ids where k = 'L_B')) = current_date + 10,
+            'the counterparty cannot move it');
+:as_A
+update public.ledgers set due_on = null where id = (select v from t.ids where k = 'L_B');
+select t.ok((select due_on from public.ledgers where id = (select v from t.ids where k = 'L_B')) is null,
+            'the owner clears it');
+:as_anon
+select t.err($$update public.ledgers set due_on = current_date$$, '42501', 'anon cannot set a repayment day');
+reset role;
+
 \echo ALL TESTS PASSED

@@ -290,6 +290,7 @@ class _SearchBar extends StatelessWidget {
     (LedgerSort.balance, 'الأكبر رصيداً'),
     (LedgerSort.name, 'الاسم'),
     (LedgerSort.open, 'المعلّق أولاً'),
+    (LedgerSort.due, 'موعد السداد'),
   ];
 
   @override
@@ -341,6 +342,11 @@ class _SearchBar extends StatelessWidget {
   }
 }
 
+DateTime _today() {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month, now.day);
+}
+
 class _LedgerTile extends StatelessWidget {
   const _LedgerTile({required this.ledger, required this.onTap});
 
@@ -356,6 +362,10 @@ class _LedgerTile extends StatelessWidget {
       if (l.subtitle != null) l.subtitle!,
       if (!l.otherPartyJoined) 'لم ينضم بعد',
       if (reminderDue(l, DateTime.now())) 'تذكير مستحق',
+      if (paymentOverdue(l, _today()))
+        'فات موعد السداد'
+      else if (l.dueOn != null)
+        'السداد ${shortDay(l.dueOn!)}',
       if (l.pendingCount > 0) '${l.pendingCount} بانتظار التأكيد',
       if (l.disputedCount > 0) '${l.disputedCount} معترض عليه',
     ];

@@ -13,6 +13,9 @@ enum LedgerSort {
 
   /// Ledgers with pending or disputed entries first, the most first.
   open,
+
+  /// The nearest repayment day first (overdue ones lead); none last.
+  due,
 }
 
 /// Folds what people type differently into one form, so a search finds
@@ -77,6 +80,12 @@ List<LedgerSummary> searchLedgers(
       LedgerSort.balance => 0,
       LedgerSort.name => searchKey(x.$2.title).compareTo(searchKey(y.$2.title)),
       LedgerSort.open => open(y.$2).compareTo(open(x.$2)),
+      LedgerSort.due => switch ((x.$2.dueOn, y.$2.dueOn)) {
+        (null, null) => 0,
+        (null, _) => 1,
+        (_, null) => -1,
+        (final a?, final b?) => a.compareTo(b),
+      },
     };
     return by != 0 ? by : x.$1.compareTo(y.$1);
   });

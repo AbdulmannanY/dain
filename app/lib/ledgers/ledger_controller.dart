@@ -141,6 +141,24 @@ class LedgerController extends ChangeNotifier {
     return _write(() => _repository.setReminder(ledger.id, days));
   }
 
+  /// The repayment day has passed while an agreed balance is open.
+  bool get overdue {
+    final ledger = _ledger;
+    return ledger != null && paymentOverdue(ledger, today);
+  }
+
+  /// The owner sets the repayment day ([day] null clears it).
+  Future<bool> setDueDate(DateTime? day) async {
+    final ledger = _ledger;
+    if (ledger == null || !ledger.iAmOwner) return false;
+    return _write(
+      () => _repository.setDueDate(
+        ledger.id,
+        day == null ? null : DateTime(day.year, day.month, day.day),
+      ),
+    );
+  }
+
   /// Makes a fresh share link, hands the reminder message to [copy], then
   /// records the reminder (the server stamps the time). Returns the message,
   /// or null with [formError].

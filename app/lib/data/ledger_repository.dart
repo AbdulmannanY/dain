@@ -21,6 +21,7 @@ class LedgerSummary {
     this.remindEveryDays,
     this.lastRemindedAt,
     this.counterpartyPhone,
+    this.dueOn,
   });
 
   final String id;
@@ -56,6 +57,16 @@ class LedgerSummary {
   /// The number the owner recorded for the other party (owner's view only):
   /// E.164 digits without '+'.
   final String? counterpartyPhone;
+
+  /// The repayment day the owner set (موعد السداد), seen by both sides;
+  /// null when none.
+  final DateTime? dueOn;
+}
+
+/// The repayment day has passed while an agreed balance is still open.
+bool paymentOverdue(LedgerSummary l, DateTime today) {
+  final due = l.dueOn;
+  return due != null && l.myConfirmedMinor != 0 && due.isBefore(today);
 }
 
 /// A reminder is due for the owner when one is set, the other party owes
@@ -71,9 +82,11 @@ bool reminderDue(LedgerSummary l, DateTime now) {
 /// The message the owner sends, with the share link [url].
 String reminderMessage(LedgerSummary l, String url) {
   final shop = l.subtitle == null ? '' : ' مع ${l.subtitle}';
+  final due = l.dueOn == null ? '' : 'موعد السداد: ${shortDay(l.dueOn!)}.\n';
   return 'السلام عليكم ${l.title}،\n'
       'تذكير بالرصيد المتفق عليه$shop: '
       '${formatMoney(l.myConfirmedMinor, l.currency)} عليك.\n'
+      '$due'
       'التفاصيل، وتأكيد القيود أو الاعتراض عليها:\n'
       '$url';
 }
@@ -119,6 +132,9 @@ List<LedgerSummary> buildSummaries({
             ? DateTime.parse(l['last_reminded_at'] as String)
             : null,
         counterpartyPhone: iAmOwner ? l['counterparty_phone'] as String? : null,
+        dueOn: l['due_on'] == null
+            ? null
+            : DateTime.parse(l['due_on'] as String),
       ),
     );
   }
@@ -231,6 +247,9 @@ String isoDay(DateTime d) =>
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
+/// 21/10/2026, as the screens and messages show a day.
+String shortDay(DateTime d) => '${d.day}/${d.month}/${d.year}';
+
 /// A shop the signed-in person owns.
 class Business {
   const Business({required this.id, required this.name});
@@ -280,6 +299,10 @@ abstract interface class LedgerRepository {
 
   /// The owner sets the reminder period in days (1..90), or null for off.
   Future<void> setReminder(String ledgerId, int? days);
+
+  /// The owner sets the repayment day, or clears it with null. RLS shows
+  /// the other party no row to update: [StateError].
+  Future<void> setDueDate(String ledgerId, DateTime? day);
 
   /// The owner corrects the other party's name, and the phone while they
   /// have not joined ([phone] null keeps it). Once linked, the database
@@ -354,7 +377,7 @@ class SupabaseLedgerRepository implements LedgerRepository {
         .select(
           'id, owner_id, counterparty_id, counterparty_name, '
           'counterparty_phone, currency, '
-          'remind_every_days, last_reminded_at, '
+          'remind_every_days, last_reminded_at, due_on, '
           'business:businesses(name), '
           'owner:profiles!ledgers_owner_id_fkey(full_name)',
         );
@@ -454,6 +477,16 @@ class SupabaseLedgerRepository implements LedgerRepository {
     final rows = await _client
         .from('ledgers')
         .update({'remind_every_days': days})
+        .eq('id', ledgerId)
+        .select('id');
+    if (rows.isEmpty) throw StateError('ledger not found');
+  }
+
+  @override
+  Future<void> setDueDate(String ledgerId, DateTime? day) async {
+    final rows = await _client
+        .from('ledgers')
+        .update({'due_on': day == null ? null : isoDay(day)})
         .eq('id', ledgerId)
         .select('id');
     if (rows.isEmpty) throw StateError('ledger not found');
