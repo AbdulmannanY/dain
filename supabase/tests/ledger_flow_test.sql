@@ -231,4 +231,43 @@ select t.err($$select public.mark_reminded((select v from t.ids where k = 'L_B')
              '42501', 'anon cannot mark a reminder');
 reset role;
 
+-- ================= 9. Send SMS hook (20261023000000) =================
+create temp table t_hook (k text primary key, v jsonb);
+grant all on t_hook to supabase_auth_admin;
+set role supabase_auth_admin;
+insert into t_hook select 'nokeys', public.send_sms_via_gateway(
+  '{"user": {"phone": "967770827842"}, "sms": {"otp": "123456"}}');
+reset role;
+select t.ok((select v #>> '{error,http_code}' from t_hook where k = 'nokeys') = '500'
+            and (select count(*) from net.sent) = 0,
+            'without Vault credentials the hook refuses and sends nothing');
+insert into vault.decrypted_secrets values ('sms_gate_username', 'gwuser'), ('sms_gate_password', 'gw:pass');
+set role supabase_auth_admin;
+insert into t_hook select 'ok', public.send_sms_via_gateway(
+  '{"user": {"phone": "966500000009"}, "sms": {"otp": "654321", "phone": "967770827842"}}');
+insert into t_hook select 'badphone', public.send_sms_via_gateway(
+  '{"user": {"phone": "+12"}, "sms": {"otp": "654321"}}');
+insert into t_hook select 'badotp', public.send_sms_via_gateway(
+  '{"user": {"phone": "967770827842"}, "sms": {"otp": "12a"}}');
+reset role;
+select t.ok((select v from t_hook where k = 'ok') = '{}'::jsonb, 'the hook answers {} once queued');
+select t.ok((select count(*) from net.sent) = 1, 'one request, none for the bad inputs');
+select t.ok((select url from net.sent) = 'https://api.sms-gate.app/3rdparty/v1/message',
+            'to the gateway cloud');
+select t.ok((select body -> 'phoneNumbers' from net.sent) = '["+967770827842"]'::jsonb,
+            'to sms.phone (where Auth sends the code), with +');
+select t.ok((select body #>> '{textMessage,text}' from net.sent) like '%654321%',
+            'the message carries the code');
+select t.ok((select headers ->> 'Authorization' from net.sent)
+              = 'Basic ' || encode(convert_to('gwuser:gw:pass', 'UTF8'), 'base64'),
+            'basic auth from the Vault credentials');
+select t.ok((select v #>> '{error,http_code}' from t_hook where k = 'badphone') = '400'
+            and (select v #>> '{error,http_code}' from t_hook where k = 'badotp') = '400',
+            'a bad phone or code is refused');
+:as_A
+select t.err($$select public.send_sms_via_gateway('{}')$$, '42501', 'users cannot call the hook');
+:as_anon
+select t.err($$select public.send_sms_via_gateway('{}')$$, '42501', 'anon cannot call the hook');
+reset role;
+
 \echo ALL TESTS PASSED
