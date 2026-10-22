@@ -80,7 +80,9 @@ test('formatMoney matches the app', () => {
   assert.equal(formatMoney(4550, 'SAR'), '45.50 ر.س');
   assert.equal(formatMoney(-500000, 'SAR'), '5,000 ر.س');
   assert.equal(formatMoney(123456789, 'SAR'), '1,234,567.89 ر.س');
-  assert.equal(formatMoney(100, 'USD'), '1 USD');
+  assert.equal(formatMoney(100, 'USD'), '1 $');
+  assert.equal(formatMoney(5000050, 'YER'), '50,000.50 ر.ي');
+  assert.equal(formatMoney(100, 'EUR'), '1 EUR');
 });
 
 test('viewOf turns the owner-relative ledger to the visitor\'s side', () => {

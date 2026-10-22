@@ -1,5 +1,22 @@
-/// Formats an amount in minor units (halalas for SAR) for display:
-/// 4550 -> '45.50 ر.س', 500000 -> '5,000 ر.س'. The sign is dropped; callers
+/// Currencies a ledger can be opened in (`ledgers.currency`, fixed once the
+/// ledger exists), in the order the new-ledger form shows them.
+const ledgerCurrencies = ['YER', 'SAR', 'USD'];
+
+/// How a currency code is shown; an unknown code shows as itself.
+String currencySymbol(String currency) => switch (currency) {
+  'SAR' => 'ر.س',
+  'YER' => 'ر.ي',
+  'USD' => r'$',
+  _ => currency,
+};
+
+/// The currency a new ledger starts in, from the other party's normalized
+/// phone: Yemeni numbers in rials of Yemen, everything else in Saudi riyals.
+String defaultCurrencyFor(String? phone) =>
+    phone != null && phone.startsWith('967') ? 'YER' : 'SAR';
+
+/// Formats an amount in minor units (hundredths) for display:
+/// 4550 -> '45.50 ر.س', 500000 -> '5,000 ر.ي'. The sign is dropped; callers
 /// say "لك" / "عليك" instead.
 String formatMoney(int minor, String currency) {
   final abs = minor.abs();
@@ -14,8 +31,7 @@ String formatMoney(int minor, String currency) {
   }
   if (cents != 0) grouped.write('.${cents.toString().padLeft(2, '0')}');
 
-  final symbol = currency == 'SAR' ? 'ر.س' : currency;
-  return '$grouped $symbol';
+  return '$grouped ${currencySymbol(currency)}';
 }
 
 /// Largest amount the database accepts (`entries.amount_minor`).

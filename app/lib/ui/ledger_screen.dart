@@ -777,7 +777,7 @@ class _EntrySheetState extends State<_EntrySheet> {
               textDirection: TextDirection.ltr,
               decoration: InputDecoration(
                 labelText: 'المبلغ',
-                suffixText: currency == 'SAR' ? 'ر.س' : currency,
+                suffixText: currencySymbol(currency),
               ),
             ),
             const SizedBox(height: 12),

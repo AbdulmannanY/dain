@@ -164,6 +164,15 @@ void main() {
     expect(formatMoney(500000, 'SAR'), '5,000 ر.س');
     expect(formatMoney(123456789, 'SAR'), '1,234,567.89 ر.س');
     expect(formatMoney(5, 'SAR'), '0.05 ر.س');
-    expect(formatMoney(100, 'USD'), '1 USD');
+    expect(formatMoney(100, 'USD'), r'1 $');
+    expect(formatMoney(5000050, 'YER'), '50,000.50 ر.ي');
+    expect(formatMoney(100, 'EUR'), '1 EUR'); // unknown: the code itself
+  });
+
+  test('defaultCurrencyFor follows the number\'s country', () {
+    expect(defaultCurrencyFor('967774040697'), 'YER');
+    expect(defaultCurrencyFor('966500000001'), 'SAR');
+    expect(defaultCurrencyFor('201001234567'), 'SAR');
+    expect(defaultCurrencyFor(null), 'SAR');
   });
 }

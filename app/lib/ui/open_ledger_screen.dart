@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/money.dart';
 import '../core/phone_number.dart';
 import '../data/ledger_repository.dart';
 import '../ledgers/open_ledger_controller.dart';
@@ -101,6 +102,31 @@ class _OpenLedgerScreenState extends State<OpenLedgerScreen> {
             hintText: phoneHint,
             hintTextDirection: TextDirection.ltr,
             helperText: 'يرى الدفتر عندما يدخل دائن بهذا الرقم.',
+          ),
+          // The default currency follows the number's country.
+          onChanged: (_) => setState(() {}),
+        ),
+        const SizedBox(height: 24),
+        Text('العملة', style: theme.textTheme.titleSmall),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final code in ledgerCurrencies)
+              ChoiceChip(
+                key: Key('currency_$code'),
+                label: Text(currencySymbol(code)),
+                selected: _form.currencyFor(_phone.text) == code,
+                onSelected: (_) => _form.selectCurrency(code),
+              ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'لا تتغيّر العملة بعد فتح الدفتر.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
         const SizedBox(height: 24),

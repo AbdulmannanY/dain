@@ -302,6 +302,7 @@ abstract interface class LedgerRepository {
     required String counterpartyName,
     required String phone,
     String? businessId,
+    String currency = 'SAR',
   });
 }
 
@@ -504,6 +505,7 @@ class SupabaseLedgerRepository implements LedgerRepository {
     required String counterpartyName,
     required String phone,
     String? businessId,
+    String currency = 'SAR',
   }) async {
     final row = await _client
         .from('ledgers')
@@ -511,6 +513,7 @@ class SupabaseLedgerRepository implements LedgerRepository {
           'counterparty_name': counterpartyName,
           'counterparty_phone': phone,
           'business_id': ?businessId,
+          'currency': currency,
         })
         .select('id')
         .single();

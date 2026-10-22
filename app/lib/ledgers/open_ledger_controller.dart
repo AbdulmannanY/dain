@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/errors.dart';
+import '../core/money.dart';
 import '../core/phone_number.dart';
 import '../data/ledger_repository.dart';
 
@@ -41,6 +42,20 @@ class OpenLedgerController extends ChangeNotifier {
 
   LedgerOwner _owner = const PersonalOwner();
   LedgerOwner get owner => _owner;
+
+  /// The currency picked by hand; null follows the phone's country.
+  String? _currency;
+
+  /// The currency the ledger opens in for [phone] as typed: the one picked,
+  /// or [defaultCurrencyFor] the phone. Fixed once the ledger exists.
+  String currencyFor(String phone) =>
+      _currency ?? defaultCurrencyFor(normalizePhone(phone));
+
+  void selectCurrency(String currency) {
+    if (_busy) return;
+    _currency = currency;
+    _notify();
+  }
 
   bool _loading = false;
   bool get loading => _loading;
@@ -115,6 +130,7 @@ class OpenLedgerController extends ChangeNotifier {
         counterpartyName: counterpartyName,
         phone: normalized,
         businessId: owner is ShopOwner ? owner.businessId : null,
+        currency: _currency ?? defaultCurrencyFor(normalized),
       );
     } on PostgrestException catch (e) {
       _error = e.code == '23505'

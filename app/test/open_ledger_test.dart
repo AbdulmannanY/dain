@@ -171,6 +171,53 @@ void main() {
     expect(ledgers.opened, [('', '967770827842')]);
   });
 
+  bool currencySelected(WidgetTester tester, String code) =>
+      tester.widget<ChoiceChip>(find.byKey(Key('currency_$code'))).selected;
+
+  testWidgets('the currency follows the number, and stays as picked', (
+    tester,
+  ) async {
+    await openForm(tester);
+    expect(currencySelected(tester, 'SAR'), isTrue); // nothing typed yet
+    await tester.enterText(
+      find.byKey(const Key('counterparty_phone_field')),
+      '770827842',
+    );
+    await tester.pump();
+    expect(currencySelected(tester, 'YER'), isTrue);
+    await tester.enterText(
+      find.byKey(const Key('counterparty_phone_field')),
+      '0501234567',
+    );
+    await tester.pump();
+    expect(currencySelected(tester, 'SAR'), isTrue);
+
+    // Picked by hand: the number no longer changes it.
+    await tester.tap(find.byKey(const Key('currency_USD')));
+    await tester.pump();
+    await fill(tester, phone: '770827842');
+    expect(ledgers.openedCurrencies, ['USD']);
+    expect(
+      find.text('لا قيود بعد. سجّل ما أعطيته أو أخذته، ويؤكده الطرف الآخر.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('a Yemeni ledger shows rials of Yemen on its screen', (
+    tester,
+  ) async {
+    await openForm(tester);
+    await fill(tester, phone: '770827842');
+    expect(ledgers.openedCurrencies, ['YER']);
+    await tester.tap(find.byKey(const Key('add_gave_button')));
+    await tester.pumpAndSettle();
+    expect(find.text('ر.ي'), findsOneWidget); // the amount field's suffix
+    await tester.enterText(find.byKey(const Key('amount_field')), '5000');
+    await tester.tap(find.byKey(const Key('save_entry_button')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('أعطيت 5,000 ر.ي'), findsOneWidget);
+  });
+
   testWidgets('checks the name, the phone and the new shop name', (
     tester,
   ) async {

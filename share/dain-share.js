@@ -20,14 +20,19 @@ export function tokenFromHash(hash) {
   return /^[A-Za-z0-9_-]{32}$/.test(t) ? t : null;
 }
 
-/** Same as the app's formatMoney: 4550 -> '45.50 ر.س', 500000 -> '5,000 ر.س'. */
+/** Same as the app's currencySymbol: an unknown code shows as itself. */
+export function currencySymbol(currency) {
+  return { SAR: 'ر.س', YER: 'ر.ي', USD: '$' }[currency] || currency;
+}
+
+/** Same as the app's formatMoney: 4550 -> '45.50 ر.س', 500000 -> '5,000 ر.ي'. */
 export function formatMoney(minor, currency) {
   const abs = Math.abs(minor);
   const whole = Math.floor(abs / 100);
   const cents = abs % 100;
   let text = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   if (cents !== 0) text += '.' + String(cents).padStart(2, '0');
-  return `${text} ${currency === 'SAR' ? 'ر.س' : currency}`;
+  return `${text} ${currencySymbol(currency)}`;
 }
 
 export function sideLabel(minor) {

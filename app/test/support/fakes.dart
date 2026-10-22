@@ -354,11 +354,15 @@ class FakeLedgers implements LedgerRepository {
     return shop;
   }
 
+  /// The currency of every ledger opened, in order.
+  final openedCurrencies = <String>[];
+
   @override
   Future<String> openLedger({
     required String counterpartyName,
     required String phone,
     String? businessId,
+    String currency = 'SAR',
   }) async {
     final error = failNextOpenWith;
     if (error != null) {
@@ -370,6 +374,7 @@ class FakeLedgers implements LedgerRepository {
       throw const PostgrestException(message: 'duplicate', code: '23505');
     }
     opened.add(key);
+    openedCurrencies.add(currency);
     final id = 'new-${opened.length}';
     final shop = businesses.where((b) => b.id == businessId).firstOrNull;
     ledgers = [
@@ -379,7 +384,7 @@ class FakeLedgers implements LedgerRepository {
         iAmOwner: true,
         title: counterpartyName,
         subtitle: shop?.name,
-        currency: 'SAR',
+        currency: currency,
         myConfirmedMinor: 0,
         myOpenMinor: 0,
         pendingCount: 0,

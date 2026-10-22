@@ -878,4 +878,62 @@ void main() {
     skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
     timeout: const Timeout(Duration(minutes: 2)),
   );
+
+  test(
+    'a ledger opened in rials of Yemen keeps them: both sides, by link, fixed',
+    () async {
+      final aLedgers = SupabaseLedgerRepository(a.client);
+      final form = OpenLedgerController(aLedgers);
+      addTearDown(form.dispose);
+      await form.load();
+      form.select(const NewShopOwner());
+      // B's number is Saudi, so the default would be SAR: pick YER by hand.
+      expect(form.currencyFor('0500000002'), 'SAR');
+      form.selectCurrency('YER');
+      final ledgerId = await form.submit(
+        name: 'تجربة ب',
+        phone: '0500000002',
+        newShopName: 'live yer ${DateTime.now().toUtc()}',
+      );
+      expect(ledgerId, isNotNull, reason: form.error);
+      expect((await aLedgers.fetchLedger(ledgerId!)).currency, 'YER');
+
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final bLedger = await SupabaseLedgerRepository(
+        b.client,
+      ).fetchLedger(ledgerId);
+      expect(bLedger.currency, 'YER');
+
+      final aView = LedgerController(aLedgers, ledgerId);
+      addTearDown(aView.dispose);
+      await aView.load();
+      final url = await aView.createShareLink();
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      final page = await anon.rpc<dynamic>(
+        'get_shared_ledger',
+        params: {'p_token': url!.substring(url.indexOf('#') + 1)},
+      );
+      expect((page as Map)['currency'], 'YER');
+      await aView.revokeShareLink();
+
+      // The amounts mean rials of Yemen for good: currency is not updatable.
+      String? code;
+      try {
+        await a.client
+            .from('ledgers')
+            .update({'currency': 'SAR'})
+            .eq('id', ledgerId);
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(code, '42501');
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 }
