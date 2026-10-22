@@ -499,4 +499,82 @@ select t.err($$insert into public.entries (ledger_id, direction, amount_minor, k
              '42501', 'an outsider cannot pay into a ledger');
 reset role;
 
+-- ================= 16. the dashboard's flows (20261029000000) =================
+-- A new shop ledger between A and B: B owes A 100.00, pays 30.00 forty days
+-- ago and 20.00 + 5.00 today (all confirmed), then 10.00 still pending; A
+-- records 7.00 pending and 5.00 that B disputes; one more is withdrawn.
+create function t.flows(p_key text) returns text language sql as $$
+  select coalesce(string_agg(f.status || ':' || f.direction || ':' ||
+                             coalesce((f.paid_on - current_date)::text, '-') || ':' ||
+                             f.amount_minor || ':' || f.entry_count, ' '
+                             order by f.status, f.direction, f.paid_on), '')
+    from public.ledger_flows f
+   where f.ledger_id = (select v from t.ids where k = p_key)
+$$;
+grant execute on function t.flows(text) to anon, authenticated;
+:as_A
+insert into public.businesses (name) values ('Flow shop');
+insert into public.ledgers (business_id, counterparty_name, counterparty_phone)
+  select id, 'Badr', '966500000002' from public.businesses where name = 'Flow shop';
+insert into t.ids select 'L_F', l.id from public.ledgers l
+  join public.businesses b on b.id = l.business_id where b.name = 'Flow shop';
+:as_B
+select public.link_my_ledgers();
+:as_A
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 10000, 'F-debt' from t.ids where k = 'L_F';
+:as_B
+select public.respond_entry((select id from public.entries where note = 'F-debt'), 'confirmed');
+insert into public.entries (ledger_id, direction, amount_minor, note, kind, occurred_on)
+  select v, 'in', 3000, 'F-pay1', 'payment', current_date - 40 from t.ids where k = 'L_F';
+insert into public.entries (ledger_id, direction, amount_minor, note, kind)
+  select v, 'in', 2000, 'F-pay2', 'payment' from t.ids where k = 'L_F';
+insert into public.entries (ledger_id, direction, amount_minor, note, kind)
+  select v, 'in', 500, 'F-pay3', 'payment' from t.ids where k = 'L_F';
+:as_A
+select public.respond_entry((select id from public.entries where note = 'F-pay1'), 'confirmed');
+select public.respond_entry((select id from public.entries where note = 'F-pay2'), 'confirmed');
+select public.respond_entry((select id from public.entries where note = 'F-pay3'), 'confirmed');
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 700, 'F-pend' from t.ids where k = 'L_F';
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 500, 'F-disp' from t.ids where k = 'L_F';
+insert into public.entries (ledger_id, direction, amount_minor, note)
+  select v, 'out', 900, 'F-void' from t.ids where k = 'L_F';
+select public.void_entry((select id from public.entries where note = 'F-void'));
+:as_B
+insert into public.entries (ledger_id, direction, amount_minor, note, kind)
+  select v, 'in', 1000, 'F-pay4', 'payment' from t.ids where k = 'L_F';
+select public.respond_entry((select id from public.entries where note = 'F-disp'), 'disputed', 'not mine');
+:as_A
+select t.ok(t.flows('L_F') = 'pending:out:-:700:1 pending:in:-:1000:1 confirmed:in:-40:3000:1 '
+                             'confirmed:in:0:2500:2 disputed:out:-:500:1',
+            'flows: confirmed payments by day, pending and disputed apart');
+select t.ok(not exists (select 1 from public.ledger_flows f
+                         where f.ledger_id = (select v from t.ids where k = 'L_F')
+                           and f.status = 'confirmed' and f.direction = 'out'),
+            'a confirmed debt is not a flow');
+select t.ok(not exists (select 1 from public.ledger_flows where status = 'voided'),
+            'a withdrawn entry is not a flow');
+:as_B
+select t.ok(t.flows('L_F') = 'pending:out:-:700:1 pending:in:-:1000:1 confirmed:in:-40:3000:1 '
+                             'confirmed:in:0:2500:2 disputed:out:-:500:1',
+            'the other side reads the same flows');
+select t.ok(not exists (select 1 from public.ledger_flows
+                         where ledger_id = (select v from t.ids where k = 'L_C')),
+            'and none of a ledger it is not in');
+:as_C
+select t.ok(t.flows('L_F') = '', 'someone outside the ledger reads none of it');
+:as_D
+select t.ok(not exists (select 1 from public.ledger_flows), 'an unlinked phone reads nothing');
+:as_anon
+select t.err($$select count(*) from public.ledger_flows$$, '42501', 'anon cannot read the flows');
+:as_A
+select t.err($$insert into public.ledger_flows (ledger_id) select v from t.ids where k = 'L_F'$$,
+             '55000', 'flows are computed, never written (a view)');
+reset role;
+select t.ok((select reloptions from pg_class where oid = 'public.ledger_flows'::regclass)
+              @> array['security_invoker=true'],
+            'the flows view runs with the reader''s rights');
+
 \echo ALL TESTS PASSED
