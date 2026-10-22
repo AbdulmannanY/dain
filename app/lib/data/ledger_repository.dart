@@ -425,6 +425,25 @@ String isoDay(DateTime d) =>
 /// 21/10/2026, as the screens and messages show a day.
 String shortDay(DateTime d) => '${d.day}/${d.month}/${d.year}';
 
+/// The most rows PostgREST returns for one request (Supabase's max-rows);
+/// a longer read goes page by page.
+const pageSize = 1000;
+
+/// Reads every row of a query, [size] at a time: [page] returns the rows
+/// [from] to [to] (both included) of an order that does not change between
+/// pages. A page shorter than [size] is the last.
+Future<List<T>> readAllPages<T>(
+  Future<List<T>> Function(int from, int to) page, {
+  int size = pageSize,
+}) async {
+  final all = <T>[];
+  while (true) {
+    final rows = await page(all.length, all.length + size - 1);
+    all.addAll(rows);
+    if (rows.length < size) return all;
+  }
+}
+
 /// A shop the signed-in person owns.
 class Business {
   const Business({required this.id, required this.name});
@@ -561,29 +580,34 @@ class SupabaseLedgerRepository implements LedgerRepository {
 
   Future<List<LedgerSummary>> _summaries({String? id}) async {
     final myId = _myId;
-    // ledgers has two FKs to profiles, so the owner embed names its FK.
-    var ledgerQuery = _client
-        .from('ledgers')
-        .select(
-          'id, owner_id, counterparty_id, counterparty_name, '
-          'counterparty_phone, currency, '
-          'remind_every_days, last_reminded_at, due_on, '
-          'business:businesses(name), '
-          'owner:profiles!ledgers_owner_id_fkey(full_name)',
-        );
+    // Past [pageSize] ledgers one request returns only part of them, and
+    // the two reads could return different parts: both go page by page in
+    // the order of the ledger's id.
+    final ledgers = await readAllPages((from, to) {
+      // ledgers has two FKs to profiles, so the owner embed names its FK.
+      var q = _client
+          .from('ledgers')
+          .select(
+            'id, owner_id, counterparty_id, counterparty_name, '
+            'counterparty_phone, currency, '
+            'remind_every_days, last_reminded_at, due_on, '
+            'business:businesses(name), '
+            'owner:profiles!ledgers_owner_id_fkey(full_name)',
+          );
+      if (id != null) q = q.eq('id', id);
+      return q.order('id', ascending: true).range(from, to);
+    });
     // ledger_balances is a security_invoker view: same RLS as ledgers.
-    var balanceQuery = _client
-        .from('ledger_balances')
-        .select(
-          'ledger_id, confirmed_balance_minor, open_balance_minor, '
-          'pending_count, disputed_count',
-        );
-    if (id != null) {
-      ledgerQuery = ledgerQuery.eq('id', id);
-      balanceQuery = balanceQuery.eq('ledger_id', id);
-    }
-    final ledgers = await ledgerQuery;
-    final balances = await balanceQuery;
+    final balances = await readAllPages((from, to) {
+      var q = _client
+          .from('ledger_balances')
+          .select(
+            'ledger_id, confirmed_balance_minor, open_balance_minor, '
+            'pending_count, disputed_count',
+          );
+      if (id != null) q = q.eq('ledger_id', id);
+      return q.order('ledger_id', ascending: true).range(from, to);
+    });
     return buildSummaries(
       ledgerRows: ledgers,
       balanceRows: balances,
@@ -593,25 +617,34 @@ class SupabaseLedgerRepository implements LedgerRepository {
 
   @override
   Future<List<LedgerEntry>> fetchEntries(LedgerSummary ledger) async {
-    final rows = await _client
-        .from('entries')
-        .select(
-          'id, direction, amount_minor, note, occurred_on, status, '
-          'response_note, created_by, kind',
-        )
-        .eq('ledger_id', ledger.id)
-        .order('occurred_on', ascending: false)
-        .order('created_at', ascending: false);
+    // Every entry: the balances and the statement are worked out from
+    // them. The id breaks ties, so the pages never overlap.
+    final rows = await readAllPages(
+      (from, to) => _client
+          .from('entries')
+          .select(
+            'id, direction, amount_minor, note, occurred_on, status, '
+            'response_note, created_by, kind',
+          )
+          .eq('ledger_id', ledger.id)
+          .order('occurred_on', ascending: false)
+          .order('created_at', ascending: false)
+          .order('id', ascending: true)
+          .range(from, to),
+    );
     return buildEntries(rows, iAmOwner: ledger.iAmOwner, myId: _myId);
   }
 
   @override
   Future<List<EntryEvent>> fetchEntryEvents(String entryId) async {
-    final rows = await _client
-        .from('entry_events')
-        .select('event, actor, via, note, at')
-        .eq('entry_id', entryId)
-        .order('id', ascending: true);
+    final rows = await readAllPages(
+      (from, to) => _client
+          .from('entry_events')
+          .select('event, actor, via, note, at')
+          .eq('entry_id', entryId)
+          .order('id', ascending: true)
+          .range(from, to),
+    );
     return buildEvents(rows, myId: _myId);
   }
 
@@ -620,14 +653,22 @@ class SupabaseLedgerRepository implements LedgerRepository {
     List<LedgerSummary> ledgers, {
     required DateTime since,
   }) async {
-    // ledger_flows is a security_invoker view: same RLS as entries.
-    final rows = await _client
-        .from('ledger_flows')
-        .select(
-          'ledger_id, status, direction, paid_on, amount_minor, '
-          'entry_count',
-        )
-        .or('paid_on.is.null,paid_on.gte.${isoDay(since)}');
+    // ledger_flows is a security_invoker view: same RLS as entries. Its
+    // group keys make one row each, so ordering by them pages safely.
+    final rows = await readAllPages(
+      (from, to) => _client
+          .from('ledger_flows')
+          .select(
+            'ledger_id, status, direction, paid_on, amount_minor, '
+            'entry_count',
+          )
+          .or('paid_on.is.null,paid_on.gte.${isoDay(since)}')
+          .order('ledger_id', ascending: true)
+          .order('status', ascending: true)
+          .order('direction', ascending: true)
+          .order('paid_on', ascending: true)
+          .range(from, to),
+    );
     return buildFlows(rows, ledgers: ledgers);
   }
 
@@ -744,11 +785,16 @@ class SupabaseLedgerRepository implements LedgerRepository {
   @override
   Future<List<Business>> fetchMyBusinesses() async {
     // RLS also shows the shops of ledgers I am the counterparty of.
-    final rows = await _client
-        .from('businesses')
-        .select('id, name')
-        .eq('owner_id', _myId)
-        .order('name');
+    final myId = _myId;
+    final rows = await readAllPages(
+      (from, to) => _client
+          .from('businesses')
+          .select('id, name')
+          .eq('owner_id', myId)
+          .order('name')
+          .order('id', ascending: true)
+          .range(from, to),
+    );
     return [for (final r in rows) _business(r)];
   }
 

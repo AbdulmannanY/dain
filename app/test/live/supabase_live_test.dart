@@ -1347,6 +1347,28 @@ void main() {
   );
 
   test(
+    'every ledger loads, past the rows one request returns',
+    () async {
+      // A gathers new ledgers every run; past 1000 a single request returned
+      // only part of them, and the balances another part.
+      final mine = await SupabaseLedgerRepository(a.client).fetchMine();
+      final counted = await a.client
+          .from('ledgers')
+          .select('id')
+          .count(CountOption.exact);
+      expect(mine.length, counted.count);
+      expect(mine.map((l) => l.id).toSet(), hasLength(mine.length));
+      final balances = await a.client
+          .from('ledger_balances')
+          .select('ledger_id')
+          .count(CountOption.exact);
+      expect(balances.count, counted.count);
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
+  test(
     'the dashboard from both sides: collected, paid, pending, disputed',
     () async {
       const applyFirst =
