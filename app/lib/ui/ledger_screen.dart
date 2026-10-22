@@ -101,6 +101,20 @@ class _LedgerScreenState extends State<LedgerScreen> {
     );
   }
 
+  Future<void> _editCounterparty() async {
+    _ledger.clearFormError();
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _CounterpartySheet(controller: _ledger),
+    );
+    if (saved != true || !mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('حُفظت بيانات الطرف الآخر.')));
+  }
+
   Future<void> _share() async {
     _ledger.clearFormError();
     await showModalBottomSheet<void>(
@@ -121,6 +135,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
           appBar: AppBar(
             title: Text(ledger?.title ?? widget.title ?? ''),
             actions: [
+              if (ledger != null && ledger.iAmOwner)
+                IconButton(
+                  key: const Key('edit_counterparty_button'),
+                  tooltip: 'تعديل الطرف الآخر',
+                  icon: const Icon(Icons.edit_outlined),
+                  onPressed: _editCounterparty,
+                ),
               if (ledger != null && ledger.iAmOwner)
                 IconButton(
                   key: const Key('reminder_button'),
@@ -356,6 +377,103 @@ List<String> _entryDetails(LedgerEntry e) {
     },
     if (e.responseNote != null) 'الرد: ${e.responseNote}',
   ];
+}
+
+/// The owner corrects the other party's name, and their phone until they
+/// join. Pops true once saved.
+class _CounterpartySheet extends StatefulWidget {
+  const _CounterpartySheet({required this.controller});
+
+  final LedgerController controller;
+
+  @override
+  State<_CounterpartySheet> createState() => _CounterpartySheetState();
+}
+
+class _CounterpartySheetState extends State<_CounterpartySheet> {
+  late final LedgerSummary? _ledger = widget.controller.ledger;
+  late final _name = TextEditingController(text: _ledger?.title ?? '');
+  late final _phone = TextEditingController(
+    text: _ledger?.counterpartyPhone == null
+        ? ''
+        : '+${_ledger!.counterpartyPhone}',
+  );
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _phone.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final ok = await widget.controller.updateCounterparty(
+      name: _name.text,
+      phone: _phone.text,
+    );
+    if (ok && mounted) Navigator.of(context).pop(true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final c = widget.controller;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        16,
+        0,
+        16,
+        16 + MediaQuery.viewInsetsOf(context).bottom,
+      ),
+      child: ListenableBuilder(
+        listenable: c,
+        builder: (context, _) {
+          final joined = c.ledger?.otherPartyJoined ?? true;
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('الطرف الآخر', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 16),
+              TextField(
+                key: const Key('edit_name_field'),
+                controller: _name,
+                decoration: const InputDecoration(labelText: 'الاسم'),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('edit_phone_field'),
+                controller: _phone,
+                enabled: !joined,
+                keyboardType: TextInputType.phone,
+                textDirection: TextDirection.ltr,
+                decoration: InputDecoration(
+                  labelText: 'رقم جواله',
+                  helperText: joined
+                      ? 'انضم بهذا الرقم، فلا يتغيّر.'
+                      : 'تغيير الرقم يُلغي رابط المشاركة الحالي.',
+                ),
+              ),
+              if (c.formError != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  c.formError!,
+                  key: const Key('entry_error_text'),
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
+              const SizedBox(height: 16),
+              FilledButton(
+                key: const Key('save_counterparty_button'),
+                onPressed: c.saving ? null : _save,
+                child: const Text('حفظ'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
 }
 
 /// The owner's reminder period. A reminder is due when the other party owes

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../core/config.dart';
 import '../core/errors.dart';
 import '../core/money.dart';
+import '../core/phone_number.dart';
 import '../data/ledger_repository.dart';
 
 /// One ledger's screen: its balance from my side, its entries, recording a
@@ -144,6 +145,42 @@ class LedgerController extends ChangeNotifier {
     return ok ? message : null;
   }
 
+  /// The owner corrects the other party's name, and their phone until they
+  /// join. A new phone drops the share link (the database deletes it).
+  Future<bool> updateCounterparty({
+    required String name,
+    required String phone,
+  }) async {
+    final ledger = _ledger;
+    if (ledger == null || !ledger.iAmOwner) return false;
+    final text = name.trim();
+    if (text.isEmpty || text.runes.length > 80) {
+      return _failForm('اكتب اسم الطرف الآخر (حتى 80 حرفاً).');
+    }
+    String? newPhone;
+    if (!ledger.otherPartyJoined) {
+      final normalized = normalizePhone(phone);
+      if (normalized == null) return _failForm(invalidPhoneMessage);
+      if (normalized == _repository.myPhone) {
+        return _failForm('هذا رقمك أنت. أدخل رقم الطرف الآخر.');
+      }
+      if (normalized != ledger.counterpartyPhone) newPhone = normalized;
+    }
+    final ok = await _write(
+      () => _repository.updateCounterparty(
+        ledger.id,
+        name: text,
+        phone: newPhone,
+      ),
+      errors: const {
+        '55000': 'انضم الطرف الآخر، فلا يتغيّر رقمه بعد الآن.',
+        '23505': 'لديك دفتر آخر لهذا الرقم بالفعل.',
+      },
+    );
+    if (ok && newPhone != null) _shareUrl = null;
+    return ok;
+  }
+
   String? _shareUrl;
 
   /// The link created in this screen; null before one is created and after
@@ -187,6 +224,7 @@ class LedgerController extends ChangeNotifier {
   Future<bool> _write(
     Future<void> Function() action, {
     bool reload = true,
+    Map<String, String> errors = const {},
   }) async {
     if (_saving) return false;
     _saving = true;
@@ -197,11 +235,13 @@ class LedgerController extends ChangeNotifier {
       await action();
     } on PostgrestException catch (e) {
       stale = e.code == '55000' || e.code == 'P0002';
-      _formError = switch (e.code) {
-        '55000' => 'تغيّرت حالة هذا القيد. أُعيد تحميل الدفتر.',
-        'P0002' => 'القيد غير موجود.',
-        _ => arabicMessageFor(e),
-      };
+      _formError =
+          errors[e.code] ??
+          switch (e.code) {
+            '55000' => 'تغيّرت حالة هذا القيد. أُعيد تحميل الدفتر.',
+            'P0002' => 'القيد غير موجود.',
+            _ => arabicMessageFor(e),
+          };
       return false;
     } catch (e) {
       _formError = arabicMessageFor(e);

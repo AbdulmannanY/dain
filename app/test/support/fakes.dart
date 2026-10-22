@@ -312,6 +312,42 @@ class FakeLedgers implements LedgerRepository {
   /// ledger id -> times a reminder was marked sent.
   final reminded = <String, int>{};
 
+  /// (ledger id, name, phone or null) of every counterparty edit.
+  final counterpartyEdits = <(String, String, String?)>[];
+
+  @override
+  Future<void> updateCounterparty(
+    String ledgerId, {
+    required String name,
+    String? phone,
+  }) async {
+    final error = failNextActionWith;
+    if (error != null) {
+      failNextActionWith = null;
+      throw error;
+    }
+    counterpartyEdits.add((ledgerId, name, phone));
+    if (phone != null) shareLinks.remove(ledgerId);
+    _replace(
+      ledgerId,
+      (l) => LedgerSummary(
+        id: l.id,
+        iAmOwner: l.iAmOwner,
+        title: name,
+        subtitle: l.subtitle,
+        currency: l.currency,
+        myConfirmedMinor: l.myConfirmedMinor,
+        myOpenMinor: l.myOpenMinor,
+        pendingCount: l.pendingCount,
+        disputedCount: l.disputedCount,
+        otherPartyJoined: l.otherPartyJoined,
+        remindEveryDays: l.remindEveryDays,
+        lastRemindedAt: l.lastRemindedAt,
+        counterpartyPhone: phone ?? l.counterpartyPhone,
+      ),
+    );
+  }
+
   @override
   Future<void> setReminder(String ledgerId, int? days) async =>
       _replace(ledgerId, (l) => _withReminder(l, days, l.lastRemindedAt));
@@ -345,6 +381,7 @@ class FakeLedgers implements LedgerRepository {
     otherPartyJoined: l.otherPartyJoined,
     remindEveryDays: days,
     lastRemindedAt: last,
+    counterpartyPhone: l.counterpartyPhone,
   );
 
   /// Shops holding ledgers: deleting one is refused like the FK does.

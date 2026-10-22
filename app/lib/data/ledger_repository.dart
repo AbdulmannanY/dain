@@ -20,6 +20,7 @@ class LedgerSummary {
     required this.otherPartyJoined,
     this.remindEveryDays,
     this.lastRemindedAt,
+    this.counterpartyPhone,
   });
 
   final String id;
@@ -51,6 +52,10 @@ class LedgerSummary {
 
   /// When the owner last sent a reminder (`mark_reminded`), null if never.
   final DateTime? lastRemindedAt;
+
+  /// The number the owner recorded for the other party (owner's view only):
+  /// E.164 digits without '+'.
+  final String? counterpartyPhone;
 }
 
 /// A reminder is due for the owner when one is set, the other party owes
@@ -113,6 +118,7 @@ List<LedgerSummary> buildSummaries({
         lastRemindedAt: iAmOwner && l['last_reminded_at'] != null
             ? DateTime.parse(l['last_reminded_at'] as String)
             : null,
+        counterpartyPhone: iAmOwner ? l['counterparty_phone'] as String? : null,
       ),
     );
   }
@@ -275,6 +281,15 @@ abstract interface class LedgerRepository {
   /// The owner sets the reminder period in days (1..90), or null for off.
   Future<void> setReminder(String ledgerId, int? days);
 
+  /// The owner corrects the other party's name, and the phone while they
+  /// have not joined ([phone] null keeps it). Once linked, the database
+  /// refuses a new phone (`55000`); a new phone also drops the share link.
+  Future<void> updateCounterparty(
+    String ledgerId, {
+    required String name,
+    String? phone,
+  });
+
   /// The owner records a reminder sent now, by the server's clock
   /// (`mark_reminded`).
   Future<void> markReminded(String ledgerId);
@@ -337,7 +352,8 @@ class SupabaseLedgerRepository implements LedgerRepository {
     var ledgerQuery = _client
         .from('ledgers')
         .select(
-          'id, owner_id, counterparty_id, counterparty_name, currency, '
+          'id, owner_id, counterparty_id, counterparty_name, '
+          'counterparty_phone, currency, '
           'remind_every_days, last_reminded_at, '
           'business:businesses(name), '
           'owner:profiles!ledgers_owner_id_fkey(full_name)',
@@ -438,6 +454,20 @@ class SupabaseLedgerRepository implements LedgerRepository {
     final rows = await _client
         .from('ledgers')
         .update({'remind_every_days': days})
+        .eq('id', ledgerId)
+        .select('id');
+    if (rows.isEmpty) throw StateError('ledger not found');
+  }
+
+  @override
+  Future<void> updateCounterparty(
+    String ledgerId, {
+    required String name,
+    String? phone,
+  }) async {
+    final rows = await _client
+        .from('ledgers')
+        .update({'counterparty_name': name, 'counterparty_phone': ?phone})
         .eq('id', ledgerId)
         .select('id');
     if (rows.isEmpty) throw StateError('ledger not found');

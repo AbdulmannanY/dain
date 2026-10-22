@@ -937,6 +937,85 @@ void main() {
     timeout: const Timeout(Duration(minutes: 2)),
   );
 
+  test(
+    'the owner corrects the other party: name always, phone until they join',
+    () async {
+      final aRepo = SupabaseLedgerRepository(a.client);
+      final shop = await aRepo.createBusiness(
+        'live edit ${DateTime.now().toUtc()}',
+      );
+      Future<String> open(String phone) async => aRepo.openLedger(
+        counterpartyName: 'مؤقت',
+        phone: phone,
+        businessId: shop.id,
+      );
+      final first = await open('966500000009');
+      await open('966500000007');
+      final view = LedgerController(aRepo, first);
+      addTearDown(view.dispose);
+      await view.load();
+      expect(view.ledger!.counterpartyPhone, '966500000009');
+      final url = await view.createShareLink();
+
+      // A phone taken by another ledger in the same shop: 23505.
+      expect(
+        await view.updateCounterparty(name: 'مؤقت', phone: '0500000007'),
+        isFalse,
+      );
+      expect(view.formError, 'لديك دفتر آخر لهذا الرقم بالفعل.');
+
+      expect(
+        await view.updateCounterparty(name: ' مصحّح ', phone: '0500000008'),
+        isTrue,
+        reason: view.formError,
+      );
+      expect(view.ledger!.title, 'مصحّح');
+      expect(view.ledger!.counterpartyPhone, '966500000008');
+      expect(view.shareUrl, isNull);
+
+      // The new phone dropped the share link in the database.
+      final anon = SupabaseClient(
+        DainConfig.supabaseUrl,
+        DainConfig.supabaseKey,
+        authOptions: const AuthClientOptions(autoRefreshToken: false),
+      );
+      addTearDown(anon.dispose);
+      String? code;
+      try {
+        await anon.rpc<dynamic>(
+          'get_shared_ledger',
+          params: {'p_token': url!.substring(url.indexOf('#') + 1)},
+        );
+      } on PostgrestException catch (e) {
+        code = e.code;
+      }
+      expect(code, 'P0002');
+
+      // Linked: the database refuses a new phone (55000); the name changes.
+      final linked = await open('966500000002');
+      expect(await b.relaunch(), greaterThanOrEqualTo(1));
+      final linkedView = LedgerController(aRepo, linked);
+      addTearDown(linkedView.dispose);
+      await linkedView.load();
+      expect(linkedView.ledger!.otherPartyJoined, isTrue);
+      final raw = await a.client
+          .from('ledgers')
+          .update({'counterparty_phone': '966500000006'})
+          .eq('id', linked)
+          .select('id')
+          .then<String?>((_) => null)
+          .catchError((Object e) => (e as PostgrestException).code);
+      expect(raw, '55000');
+      expect(
+        await linkedView.updateCounterparty(name: 'تجربة ب', phone: 'ignored'),
+        isTrue,
+        reason: linkedView.formError,
+      );
+    },
+    skip: _live ? false : 'live test: pass --dart-define=DAIN_LIVE=true',
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
+
   // Keep this test last: it deletes B. The next run signs B up again (a new
   // profile), and link_my_ledgers() reattaches every ledger for B's phone.
   test(
