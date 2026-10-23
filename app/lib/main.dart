@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app.dart';
 import 'boot.dart';
+import 'core/app_lock.dart';
 import 'core/config.dart';
 import 'data/auth_repository.dart';
 import 'data/ledger_repository.dart';
@@ -33,8 +34,14 @@ Future<Widget> _start() async {
     profiles: SupabaseProfileRepository(client),
   );
   unawaited(controller.start());
+  final appLock = AppLockController(
+    biometrics: LocalBiometrics(),
+    store: PrefsLockStore(),
+  );
+  await appLock.load();
   return DainApp(
     controller: controller,
     ledgers: SupabaseLedgerRepository(client),
+    appLock: appLock,
   );
 }

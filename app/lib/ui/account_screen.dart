@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../core/config.dart';
 import '../core/open_url.dart';
 import '../session/session_controller.dart';
+import 'app_lock_screen.dart';
 
 /// "My account": my name as others see it, the privacy policy, and
 /// deleting the account.
@@ -107,6 +108,28 @@ class _AccountScreenState extends State<AccountScreen> {
                 subtitle: const Text('ما نحفظه ومن يراه، وتفتح في المتصفح.'),
                 onTap: _privacy,
               ),
+              if (AppLockScope.maybeOf(context) case final lock?)
+                SwitchListTile(
+                  key: const Key('app_lock_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  secondary: const Icon(Icons.fingerprint),
+                  title: const Text('قفل التطبيق بالبصمة'),
+                  subtitle: const Text(
+                    'يُطلب عند الفتح وبعد 30 ثانية في الخلفية. يعمل برمز الجوال إن لم توجد بصمة.',
+                  ),
+                  value: lock.enabled,
+                  onChanged: lock.busy
+                      ? null
+                      : (on) async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          final why = await lock.setEnabled(on);
+                          if (why != null) {
+                            messenger.showSnackBar(
+                              SnackBar(content: Text(why)),
+                            );
+                          }
+                        },
+                ),
               const SizedBox(height: 16),
               const Divider(),
               const SizedBox(height: 16),

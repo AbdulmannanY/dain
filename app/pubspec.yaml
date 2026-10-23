@@ -12,6 +12,13 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   supabase_flutter: ^2.18.3
+  # The app lock (fingerprint, face or the device PIN). Plugins reached
+  # through JNI break under R8; this one uses method channels, and
+  # test/release_plugins_test.dart still checks that no jni resolves.
+  local_auth: ^3.0.2
+  # Already in the app through supabase_flutter; used directly for the
+  # app-lock setting on this device.
+  shared_preferences: ^2.5.3
   # Not used directly: supabase_flutter stores the session through it.
   # 2.5.x calls its Kotlin registrar through JNI by name, and R8 renames or
   # strips that method in release builds, so the APK failed at startup with

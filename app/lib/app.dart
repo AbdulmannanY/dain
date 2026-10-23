@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'core/app_lock.dart';
 import 'data/ledger_repository.dart';
 import 'session/session_controller.dart';
+import 'ui/app_lock_screen.dart';
 import 'ui/brand.dart';
 import 'ui/session_gate.dart';
 
 class DainApp extends StatelessWidget {
-  const DainApp({super.key, required this.controller, required this.ledgers});
+  const DainApp({
+    super.key,
+    required this.controller,
+    required this.ledgers,
+    this.appLock,
+  });
 
   final SessionController controller;
   final LedgerRepository ledgers;
+
+  /// The fingerprint or device-PIN lock; null leaves the app unlocked.
+  final AppLockController? appLock;
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +33,19 @@ class DainApp extends StatelessWidget {
       theme: theme(Brightness.light),
       darkTheme: theme(Brightness.dark),
       home: SessionGate(controller: controller, ledgers: ledgers),
+      builder: (context, child) {
+        final lock = appLock;
+        if (lock == null) return child!;
+        // Above the navigator, so the lock covers every screen and keeps it.
+        return ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => AppLockGate(
+            lock: lock,
+            active: controller.stage == SessionStage.ready,
+            child: child!,
+          ),
+        );
+      },
     );
   }
 
