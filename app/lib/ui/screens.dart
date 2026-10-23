@@ -3,21 +3,26 @@ import 'package:flutter/material.dart';
 import '../core/phone_number.dart';
 
 import '../session/session_controller.dart';
+import 'brand.dart';
 
-/// Shared frame: a centred column with a title, a subtitle, the stage's
-/// controls and the controller's error.
+/// Shared frame: the brand, the sign-in step, a title and a subtitle, the
+/// stage's controls in a card, and the controller's error.
 class _Frame extends StatelessWidget {
   const _Frame({
     required this.controller,
     required this.title,
     required this.subtitle,
     required this.children,
+    this.step,
   });
 
   final SessionController controller;
   final String title;
   final String subtitle;
   final List<Widget> children;
+
+  /// 0 phone, 1 code, 2 name; null hides the step bar.
+  final int? step;
 
   @override
   Widget build(BuildContext context) {
@@ -33,7 +38,18 @@ class _Frame extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(title, style: theme.textTheme.headlineMedium),
+                  BrandMark(size: 76, showTagline: step == 0),
+                  const SizedBox(height: 24),
+                  if (step != null) ...[
+                    StepBar(step: step!),
+                    const SizedBox(height: 24),
+                  ],
+                  Text(
+                    title,
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                   const SizedBox(height: 8),
                   Text(
                     subtitle,
@@ -41,14 +57,23 @@ class _Frame extends StatelessWidget {
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
                   ),
-                  const SizedBox(height: 32),
+                  const SizedBox(height: 24),
                   ...children,
                   if (error != null) ...[
                     const SizedBox(height: 16),
-                    Text(
-                      error,
-                      key: const Key('error_text'),
-                      style: TextStyle(color: theme.colorScheme.error),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.errorContainer,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        error,
+                        key: const Key('error_text'),
+                        style: TextStyle(
+                          color: theme.colorScheme.onErrorContainer,
+                        ),
+                      ),
                     ),
                   ],
                 ],
@@ -113,9 +138,10 @@ class _PhoneScreenState extends State<PhoneScreen> {
   Widget build(BuildContext context) {
     return _Frame(
       controller: widget.controller,
-      title: 'دائن',
+      step: 0,
+      title: 'ادخل برقم جوالك',
       subtitle:
-          'دفتر ديونك مع الناس والمحلات، يؤكّده الطرفان. ادخل برقم جوالك.',
+          'دفتر ديونك مع الناس والمحلات، يؤكّده الطرفان. نرسل لك رمزاً للتحقق.',
       children: [
         TextField(
           key: const Key('phone_field'),
@@ -127,6 +153,7 @@ class _PhoneScreenState extends State<PhoneScreen> {
             labelText: 'رقم الجوال',
             hintText: phoneHint,
             hintTextDirection: TextDirection.ltr,
+            prefixIcon: Icon(Icons.phone_iphone),
           ),
           onSubmitted: (_) => _submit(),
         ),
@@ -167,23 +194,11 @@ class _CodeScreenState extends State<CodeScreen> {
     final c = widget.controller;
     return _Frame(
       controller: c,
+      step: 1,
       title: 'رمز التحقق',
       subtitle: 'أدخل الرمز المرسل إلى \u2066+${c.phone ?? ''}\u2069',
       children: [
-        TextField(
-          key: const Key('code_field'),
-          controller: _field,
-          keyboardType: TextInputType.number,
-          textDirection: TextDirection.ltr,
-          textAlign: TextAlign.center,
-          maxLength: 6,
-          autofillHints: const [AutofillHints.oneTimeCode],
-          decoration: const InputDecoration(
-            labelText: 'الرمز',
-            counterText: '',
-          ),
-          onSubmitted: (_) => _submit(),
-        ),
+        _CodeBoxes(controller: _field, onSubmitted: _submit),
         const SizedBox(height: 16),
         _SubmitButton(
           buttonKey: const Key('verify_button'),
@@ -226,6 +241,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return _Frame(
       controller: widget.controller,
+      step: 2,
       title: 'ما اسمك؟',
       subtitle: 'يظهر اسمك لكل من تسجّل معه دَيناً.',
       children: [
@@ -238,6 +254,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           decoration: const InputDecoration(
             labelText: 'الاسم',
             counterText: '',
+            prefixIcon: Icon(Icons.person_outline),
           ),
           onSubmitted: (_) => _submit(),
         ),
@@ -278,6 +295,87 @@ class FailedScreen extends StatelessWidget {
           child: const Text('تسجيل الخروج'),
         ),
       ],
+    );
+  }
+}
+
+/// Six boxes for the code. One real field (key `code_field`) sits over them,
+/// transparent, so typing, pasting and SMS autofill work as usual; the boxes
+/// only draw what it holds.
+class _CodeBoxes extends StatelessWidget {
+  const _CodeBoxes({required this.controller, required this.onSubmitted});
+
+  final TextEditingController controller;
+  final VoidCallback onSubmitted;
+
+  static const length = 6;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      height: 60,
+      child: Stack(
+        children: [
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: ListenableBuilder(
+              listenable: controller,
+              builder: (context, _) {
+                final text = controller.text;
+                return Row(
+                  children: [
+                    for (var i = 0; i < length; i++) ...[
+                      if (i > 0) const SizedBox(width: 8),
+                      Expanded(
+                        child: Container(
+                          key: Key('code_box_$i'),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: scheme.surfaceContainerLow,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: i == text.length
+                                  ? scheme.primary
+                                  : scheme.outlineVariant,
+                              width: i == text.length ? 1.8 : 1,
+                            ),
+                          ),
+                          child: Text(
+                            i < text.length ? text[i] : '',
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                );
+              },
+            ),
+          ),
+          Positioned.fill(
+            child: Opacity(
+              opacity: 0,
+              child: TextField(
+                key: const Key('code_field'),
+                controller: controller,
+                autofocus: true,
+                keyboardType: TextInputType.number,
+                textDirection: TextDirection.ltr,
+                maxLength: length,
+                showCursor: false,
+                enableInteractiveSelection: false,
+                autofillHints: const [AutofillHints.oneTimeCode],
+                decoration: const InputDecoration(counterText: ''),
+                onSubmitted: (_) => onSubmitted(),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app.dart';
+import 'ui/brand.dart';
 
 /// The first widget on screen. It draws at once, then runs [init] (Supabase
 /// and the session) and shows what [init] returns. A failure or a hang
@@ -65,6 +66,8 @@ class _DainBootState extends State<DainBoot> {
                   ? const Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
+                        BrandMark(),
+                        SizedBox(height: 32),
                         CircularProgressIndicator(),
                         SizedBox(height: 16),
                         Text('جارٍ البدء…', key: Key('boot_starting')),
